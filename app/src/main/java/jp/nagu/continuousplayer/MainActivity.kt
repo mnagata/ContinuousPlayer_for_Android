@@ -229,7 +229,11 @@ class MainActivity : AppCompatActivity() {
         bitPerfectAudio = bitPerfect
         val bitPerfectTarget = videos.getOrNull(startIndex) ?: videos.firstOrNull()
         if (bitPerfectTarget != null) {
-            bitPerfect.configure(Uri.parse(bitPerfectTarget.uri))
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    bitPerfect.configure(Uri.parse(bitPerfectTarget.uri))
+                }
+            }
         }
 
         controller.setPlaylist(videos, startIndex)
@@ -265,20 +269,23 @@ class MainActivity : AppCompatActivity() {
         val video = viewModel.videos.getOrNull(index) ?: return
         val videoUri = Uri.parse(video.uri)
 
-        val audioInfo = bitPerfectAudio?.getAudioOutputInfo(videoUri) ?: ""
-        val message = buildString {
-            appendLine(video.displayName)
-            if (audioInfo.isNotEmpty()) {
-                appendLine()
-                append(audioInfo)
+        lifecycleScope.launch {
+            val audioInfo = withContext(Dispatchers.IO) {
+                bitPerfectAudio?.getAudioOutputInfo(videoUri) ?: ""
             }
+            val message = buildString {
+                appendLine(video.displayName)
+                if (audioInfo.isNotEmpty()) {
+                    appendLine()
+                    append(audioInfo)
+                }
+            }
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle(R.string.info)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
         }
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.info)
-            .setMessage(message)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
     }
 
     private fun updatePauseOverlay() {
