@@ -5,8 +5,8 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <!-- Folder select screen -->
-    <LinearLayout
+     <!-- Folder select screen -->
+     <LinearLayout
         android:id="@+id/folder_select_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -14,7 +14,7 @@
         android:orientation="vertical"
         android:visibility="visible">
 
-        <TextView
+         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginBottom="24dp"
@@ -22,42 +22,42 @@
             android:textColor="@android:color/white"
             android:textSize="24sp" />
 
-        <Button
+         <Button
             android:id="@+id/btn_select_folder"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/select_folder" />
 
-        <Button
+         <Button
             android:id="@+id/btn_exit"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:text="@string/exit_app" />
-    </LinearLayout>
+     </LinearLayout>
 
-    <!-- Player screen -->
-    <FrameLayout
+     <!-- Player screen -->
+     <FrameLayout
         android:id="@+id/player_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone">
 
-        <androidx.media3.ui.PlayerView
+         <androidx.media3.ui.PlayerView
             android:id="@+id/player_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             app:use_controller="false"
             app:show_buffering="when_playing" />
 
-        <View
+         <View
             android:id="@+id/touch_overlay"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:importantForAccessibility="no" />
 
-        <!-- Pause toolbar -->
-        <LinearLayout
+         <!-- Pause toolbar -->
+         <LinearLayout
             android:id="@+id/pause_overlay"
             android:layout_width="match_parent"
             android:layout_height="48dp"
@@ -68,7 +68,7 @@
             android:paddingHorizontal="8dp"
             android:visibility="gone">
 
-            <TextView
+             <TextView
                 android:id="@+id/overlay_filename"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -78,7 +78,7 @@
                 android:textColor="@android:color/white"
                 android:textSize="14sp" />
 
-            <ImageButton
+             <ImageButton
                 android:id="@+id/btn_overlay_info"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
@@ -87,7 +87,7 @@
                 android:src="@drawable/ic_info"
                 android:tooltipText="@string/info" />
 
-            <ImageButton
+             <ImageButton
                 android:id="@+id/btn_overlay_select_folder"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
@@ -96,7 +96,7 @@
                 android:src="@drawable/ic_folder_open"
                 android:tooltipText="@string/select_folder" />
 
-            <ImageButton
+             <ImageButton
                 android:id="@+id/btn_overlay_exit"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
@@ -105,7 +105,22 @@
                 android:contentDescription="@string/exit_app"
                 android:src="@drawable/ic_close"
                 android:tooltipText="@string/exit_app" />
-        </LinearLayout>
-    </FrameLayout>
+         </LinearLayout>
+
+         <!-- Portrait video info (centered in bottom dark area) -->
+         <TextView
+            android:id="@+id/portrait_video_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="120dp"
+            android:gravity="center"
+            android:paddingHorizontal="16dp"
+            android:textColor="#B0FFFFFF"
+            android:textSize="13sp"
+            android:lineSpacingExtra="2dp"
+            android:visibility="gone" />
+
+     </FrameLayout>
 
 </FrameLayout>
