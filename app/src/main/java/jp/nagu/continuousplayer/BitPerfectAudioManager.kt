@@ -192,6 +192,51 @@ class BitPerfectAudioManager(private val context: Context) {
         return sb.toString().trimEnd()
     }
 
+    /**
+     * 出力デバイスとミキサー状態の概要を返す（UIスレッドから呼べる軽量版）。
+     */
+    fun getOutputSummary(): String {
+        val sb = StringBuilder()
+
+        // Output device
+        val outputDevice = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET
+            }
+        val deviceName = outputDevice?.productName?.takeIf { it.isNotBlank() }
+            ?: getDeviceTypeName(outputDevice?.type)
+        sb.append("Output: $deviceName")
+
+        // Bit-perfect status
+        if (activeDevice != null) {
+            sb.append("  [Bit-Perfect]")
+        }
+
+        // Preferred mixer info
+        val audioAttrs = android.media.AudioAttributes.Builder()
+            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+        val mixerDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).filter { device ->
+            try {
+                audioManager.getSupportedMixerAttributes(device).isNotEmpty()
+            } catch (_: Exception) { false }
+        }
+        for (device in mixerDevices) {
+            val preferred = audioManager.getPreferredMixerAttributes(audioAttrs, device)
+            if (preferred != null) {
+                val fmt = preferred.format
+                sb.append("\nMixer: ${encodingName(fmt.encoding)}  ${fmt.sampleRate}Hz  ${fmt.channelCount}ch")
+            }
+        }
+
+        return sb.toString()
+    }
+
     private fun getDeviceTypeName(type: Int?): String = when (type) {
         AudioDeviceInfo.TYPE_USB_DEVICE -> "USB Audio"
         AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Audio"
