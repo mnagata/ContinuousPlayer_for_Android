@@ -105,21 +105,31 @@ class VideoScanner(private val context: Context) {
         }
         Log.d(TAG, "scanTree: total ${filtered.size} video files found")
 
-        return filtered.sortedWith(
-            java.util.Comparator<VideoItem> { a, b ->
-                val nameA = a.displayName.lowercase(Locale.ROOT)
-                val nameB = b.displayName.lowercase(Locale.ROOT)
-                // Extract title prefix (everything before the last space-separated segment)
-                val titleA = nameA.substringBeforeLast(" ").trim()
-                val titleB = nameB.substringBeforeLast(" ").trim()
-                // Group by title first
-                val cmp = titleA.compareTo(titleB)
-                if (cmp != 0) return@Comparator cmp
-                // Within same title, op before ed
-                val catA = when { nameA.contains("op") && !nameA.contains("ed") -> 0; nameA.contains("ed") -> 1; else -> 2 }
-                val catB = when { nameB.contains("op") && !nameB.contains("ed") -> 0; nameB.contains("ed") -> 1; else -> 2 }
-                catA.compareTo(catB)
-            },
-        )
-    }
+	return filtered.sortedWith(
+		java.util.Comparator<VideoItem> { a, b ->
+		val nameA = a.displayName.lowercase(Locale.ROOT)
+		val nameB = b.displayName.lowercase(Locale.ROOT)
+		// Extract base name: remove op/op2/ed/ed2 suffix
+		val baseA = nameA.replace(Regex("""\s+(op|op\d|ed|ed\d)\s*\.\w+$"""), "").trim()
+		val baseB = nameB.replace(Regex("""\s+(op|op\d|ed|ed\d)\s*\.\w+$"""), "").trim()
+		// Group by base name first
+		val cmp = baseA.compareTo(baseB)
+		if (cmp != 0) return@Comparator cmp
+		// Same base: extract variant number (op/ed=0, op2/ed2=1, etc.)
+		val numA = extractVariantNum(nameA)
+		val numB = extractVariantNum(nameB)
+		val numCmp = numA.compareTo(numB)
+		if (numCmp != 0) return@Comparator numCmp
+		// Same variant: op before ed
+		val catA = if (nameA.contains("op")) 0 else 1
+		val catB = if (nameB.contains("op")) 0 else 1
+		catA.compareTo(catB)
+	},
+	)
+	}
+
+	private fun extractVariantNum(name: String): Int {
+		val match = Regex("""(?:op|ed)(\d*)""").find(name) ?: return 0
+		return if (match.groupValues[1].isEmpty()) 0 else match.groupValues[1].toInt()
+	}
 }
