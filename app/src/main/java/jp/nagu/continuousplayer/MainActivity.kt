@@ -263,6 +263,14 @@ class MainActivity : AppCompatActivity() {
                     updatePortraitVideoInfo()
                        }
                    }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                Log.d(TAG, "onIsPlayingChanged: isPlaying=$isPlaying")
+                pauseOverlay.visibility = if (isPlaying) View.GONE else View.VISIBLE
+                if (!isPlaying) {
+                    updatePauseOverlay()
+                }
+             }
                })
 
         Log.d(TAG, "startPlayback: calling setPlaylist, videos=${videos.size}")
