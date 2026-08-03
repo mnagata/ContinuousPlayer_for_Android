@@ -105,31 +105,91 @@ class VideoScanner(private val context: Context) {
         }
         Log.d(TAG, "scanTree: total ${filtered.size} video files found")
 
-	return filtered.sortedWith(
-		java.util.Comparator<VideoItem> { a, b ->
-		val nameA = a.displayName.lowercase(Locale.ROOT)
-		val nameB = b.displayName.lowercase(Locale.ROOT)
-		// Extract base name: remove op/op2/ed/ed2 suffix
-		val baseA = nameA.replace(Regex("""\s+(op|op\d|ed|ed\d)\s*\.\w+$"""), "").trim()
-		val baseB = nameB.replace(Regex("""\s+(op|op\d|ed|ed\d)\s*\.\w+$"""), "").trim()
-		// Group by base name first
-		val cmp = baseA.compareTo(baseB)
-		if (cmp != 0) return@Comparator cmp
-		// Same base: extract variant number (op/ed=0, op2/ed2=1, etc.)
-		val numA = extractVariantNum(nameA)
-		val numB = extractVariantNum(nameB)
-		val numCmp = numA.compareTo(numB)
-		if (numCmp != 0) return@Comparator numCmp
-		// Same variant: op before ed
-		val catA = if (nameA.contains("op")) 0 else 1
-		val catB = if (nameB.contains("op")) 0 else 1
-		catA.compareTo(catB)
-	},
-	)
+        return sortLikeSafThenReorderOpEd(filtered)
 	}
 
 	private fun extractVariantNum(name: String): Int {
 		val match = Regex("""(?:op|ed)(\d*)""").find(name) ?: return 0
 		return if (match.groupValues[1].isEmpty()) 0 else match.groupValues[1].toInt()
 	}
+
+    private data class OpEdInfo(
+        val baseKey: String,
+        val number: Int,
+        val category: Int
+    )
+
+    private val opEdRegex = Regex("""^(.+?)\s+(OP|ED)(\d*)$""", RegexOption.IGNORE_CASE)
+
+    private fun sortLikeSafThenReorderOpEd(
+        items: List<VideoItem>
+    ): List<VideoItem> {
+        // 1. SAFの標準DocumentsUI相当の名前昇順
+        val result = items.sortedWith { a, b ->
+            collator.compare(a.displayName, b.displayName)
+        }.toMutableList()
+
+        // 2. 同じベース名のOP/EDファイル位置を収集
+        val groups = mutableMapOf<String, MutableList<Int>>()
+
+        result.forEachIndexed { index, item ->
+            val info = parseOpEd(item.displayName) ?: return@forEachIndexed
+            groups.getOrPut(info.baseKey) { mutableListOf() }.add(index)
+        }
+
+        // 3. OP/EDファイルだけ入れ替える
+        groups.values.forEach { posotions ->
+            if (posotions.size < 2) return@forEach
+
+            val reordered = posotions
+                .map { result[it] }
+                .sortedWith { a, b ->
+                    val infoA = requireNotNull(parseOpEd(a.displayName))
+                    val infoB = requireNotNull(parseOpEd(b.displayName))
+
+                    // OP -> ED -> OP2 -> ED2 -> OP3 -> ED3
+                    val numberComparison = infoA.number.compareTo(infoB.number)
+                    if (numberComparison != 0) {
+                        numberComparison
+                    } else {
+                        val categoryComparison = infoA.category.compareTo(infoB.category)
+
+                        if (categoryComparison != 0) {
+                            categoryComparison
+                        } else {
+                            collator.compare(a.displayName, b.displayName)
+                        }
+                    }
+                }
+            posotions.forEachIndexed { positionIndex, resultIndex ->
+                result[resultIndex] = reordered[positionIndex]
+            }
+        }
+        return result
+    }
+
+    private fun parseOpEd(fileName: String): OpEdInfo? {
+        // 最後の拡張子だけを除去
+        val stem = fileName.substringBeforeLast('.', fileName).trim()
+        val match = opEdRegex.matchEntire(stem) ?: return null
+
+        val baseKey = match.groupValues[1]
+            .trim()
+            .lowercase(Locale.ROOT)
+
+        val category = when (match.groupValues[2].uppercase(Locale.ROOT)) {
+            "OP" -> 0
+            "ED" -> 1
+            else -> return null
+        }
+
+        // OP/EDは1, OP2/ED2は2
+        val number = match.groupValues[3].toIntOrNull() ?: 1
+
+        return OpEdInfo(
+            baseKey = baseKey,
+            number = number,
+            category = category
+        )
+    }
 }
