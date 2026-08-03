@@ -8,21 +8,15 @@ import java.util.Locale
 
 class VideoScanner(private val context: Context) {
 
-    companion object {
-        private const val TAG = "VideoScanner"
-    }
-
     private val collator: Collator = Collator.getInstance(Locale.getDefault()).apply {
         strength = Collator.SECONDARY
     }
 
     fun scanTree(treeUri: Uri, documentUri: Uri): List<VideoItem> {
-        //Log.d(TAG, "scanTree START: treeUri=$treeUri, documentUri=$documentUri")
 
         // documentUri is the parent directory URI — use it directly as scan root
         val tree = DocumentFile.fromTreeUri(context, treeUri)
             ?: run {
-                //Log.e(TAG, "scanTree: fromTreeUri returned null for $treeUri")
                 return emptyList()
             }
 
@@ -32,13 +26,11 @@ class VideoScanner(private val context: Context) {
                 .substringAfter("tree/")
                 .substringBefore('?')
                 .let { Uri.decode(it) }
-            //Log.d(TAG, "scanTree: treeDocId=$treeDocId")
 
             val docId = documentUri.toString()
                 .substringAfter("document/")
                 .substringBefore('?')
                 .let { Uri.decode(it) }
-            //Log.d(TAG, "scanTree: docId=$docId")
 
             if (docId.startsWith(treeDocId)) {
                 val relativePath = docId.substring(treeDocId.length)
@@ -64,20 +56,10 @@ class VideoScanner(private val context: Context) {
         }
 
         if (scanRoot == null) {
-            //Log.e(TAG, "scanTree: scanRoot is null, falling back to tree root")
             return emptyList()
         }
-        //Log.d(TAG, "scanTree: scanRoot=${scanRoot.name}, exists=${scanRoot.exists()}")
 
         val allFiles = scanRoot.listFiles()
-        //Log.d(TAG, "scanTree: listFiles() returned ${allFiles.size} items")
-
-        for (doc in allFiles) {
-            val name = doc.name
-            val isFile = doc.isFile
-            val isDir = doc.isDirectory
-            //Log.d(TAG, "scanTree: item: name=$name, isFile=$isFile, isDir=$isDir, uri=${doc.uri}")
-        }
 
         val filtered = allFiles.filter { doc ->
             val name = doc.name ?: return@filter false
@@ -90,9 +72,6 @@ class VideoScanner(private val context: Context) {
                 name.endsWith(".wav", ignoreCase = true) ||
                 name.endsWith(".ogg", ignoreCase = true) ||
                 name.endsWith(".opus", ignoreCase = true)
-            if (isVideoFile) {
-                //Log.d(TAG, "scanTree: video file found: name=$name, uri=${doc.uri}")
-            }
             return@filter isVideoFile
         }.map { doc ->
             VideoItem(
@@ -102,14 +81,8 @@ class VideoScanner(private val context: Context) {
                 lastModified = doc.lastModified()
             )
         }
-        //Log.d(TAG, "scanTree: total ${filtered.size} video files found")
 
         return sortLikeSafThenReorderOpEd(filtered)
-	}
-
-	private fun extractVariantNum(name: String): Int {
-		val match = Regex("""(?:op|ed)(\d*)""").find(name) ?: return 0
-		return if (match.groupValues[1].isEmpty()) 0 else match.groupValues[1].toInt()
 	}
 
     private data class OpEdInfo(
