@@ -18,7 +18,10 @@ import androidx.media3.session.MediaSession
  * 再生エラー発生時は自動的に次のトラックへスキップする。
  * 使用後は [release] を呼んでリソースを解放すること。
  */
-class PlayerController(context: Context) {
+class PlayerController(
+    context: Context,
+    private val onPlaybackFailure: ((PlaybackException) -> Unit)? = null
+) {
 
     companion object {
         private const val TAG = "PlayerController"
@@ -35,6 +38,12 @@ class PlayerController(context: Context) {
 
     private val errorListener = object : Player.Listener {
         override fun onPlayerError(error: PlaybackException) {
+            Log.e(TAG, "Playback failed: ${error.errorCodeName}", error)
+            // A TV without ADB needs a visible error instead of silently skipping files.
+            if (onPlaybackFailure != null) {
+                onPlaybackFailure.invoke(error)
+                return
+            }
             errorCount++
             Log.e(TAG, "Playback error ($errorCount/$MAX_ERROR_COUNT): ${error.message}")
             if (errorCount >= MAX_ERROR_COUNT) {

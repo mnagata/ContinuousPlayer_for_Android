@@ -3,6 +3,9 @@ package jp.nagu.continuousplayer
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.os.Environment
+import android.provider.Settings
 import android.content.res.Configuration
 import android.media.AudioManager
 import android.net.Uri
@@ -10,6 +13,7 @@ import android.os.Bundle
 import android.provider.DocumentsContract
 import android.util.Log
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
@@ -52,6 +56,24 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pauseOverlay: LinearLayout
     private lateinit var overlayFilename: TextView
     private lateinit var portraitVideoInfo: TextView
+    private lateinit var selectFolderButton: Button
+    private lateinit var overlayPlayPauseButton: ImageButton
+    private lateinit var usbBrowser: UsbFileBrowser
+    private var playbackErrorDialog: AlertDialog? = null
+
+    private val storageSettings = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Environment.isExternalStorageManager()) {
+            usbBrowser.open()
+        } else {
+            Toast.makeText(this, R.string.usb_permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val isTelevision: Boolean
+        get() = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK ==
+            Configuration.UI_MODE_TYPE_TELEVISION
 
     private val treePicker = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -62,11 +84,28 @@ class MainActivity : AppCompatActivity() {
          ) { uri -> uri?.let { onFileSelected(it) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The system starting window uses the manifest theme; content uses the normal theme.
+        setTheme(R.style.Theme_ContinuousPlayer)
         super.onCreate(savedInstanceState)
+        // Android TV uses its system launch transition instead of custom splash animations.
+        if (!isTelevision) {
+            splashScreen.setOnExitAnimationListener { splash ->
+                splash.animate()
+                    .alpha(0f)
+                    .setDuration(180L)
+                    .withEndAction { splash.remove() }
+                    .start()
+            }
+        }
         setContentView(R.layout.activity_main)
 
         viewModel = ViewModelProvider(this)[PlayerViewModel::class.java]
         scanner = VideoScanner(this)
+        usbBrowser = UsbFileBrowser(this) { videos, index ->
+            viewModel.videos = videos
+            startPlayback(videos, index)
+            showPlayer()
+        }
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
 
         folderSelectContainer = findViewById(R.id.folder_select_container)
@@ -76,12 +115,19 @@ class MainActivity : AppCompatActivity() {
         overlayFilename = findViewById(R.id.overlay_filename)
         portraitVideoInfo = findViewById(R.id.portrait_video_info)
 
-        findViewById<Button>(R.id.btn_select_folder).setOnClickListener {
+        selectFolderButton = findViewById(R.id.btn_select_folder)
+        overlayPlayPauseButton = findViewById(R.id.btn_overlay_play_pause)
+
+        selectFolderButton.setOnClickListener {
             launchPicker()
               }
 
         findViewById<Button>(R.id.btn_exit).setOnClickListener {
             finishAndRemoveTask()
+              }
+
+        overlayPlayPauseButton.setOnClickListener {
+            togglePlayPause()
               }
 
         findViewById<ImageButton>(R.id.btn_overlay_info).setOnClickListener {
@@ -99,6 +145,11 @@ class MainActivity : AppCompatActivity() {
             finishAndRemoveTask()
               }
 
+        if (isTelevision) {
+            findViewById<TextView>(R.id.tv_controls_hint).visibility = View.VISIBLE
+            selectFolderButton.requestFocus()
+              }
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (viewModel.isPlayerScreen) {
@@ -111,25 +162,163 @@ class MainActivity : AppCompatActivity() {
                  }
              })
 
-        if (savedInstanceState == null) {
-            launchPicker()
-              } else if (viewModel.isPlayerScreen) {
+        if (savedInstanceState != null && viewModel.isPlayerScreen) {
             showPlayer()
             startPlayback(viewModel.videos)
+             } else {
+            showFolderSelect()
              }
           }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!::viewModel.isInitialized || !viewModel.isPlayerScreen ||
+            event.action != KeyEvent.ACTION_DOWN ||
+            event.repeatCount != 0
+        ) {
+            return super.dispatchKeyEvent(event)
+        }
+
+        val player = playerController?.player ?: return super.dispatchKeyEvent(event)
+        val pauseMenuHasFocus = !player.isPlaying && pauseOverlay.visibility == View.VISIBLE &&
+            currentFocus?.let { focus -> isDescendantOf(focus, pauseOverlay) } == true
+
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                togglePlayPause()
+                true
+            }
+
+            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                player.play()
+                updatePauseOverlay()
+                true
+            }
+
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                player.pause()
+                updatePauseOverlay()
+                true
+            }
+
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_BUTTON_A -> {
+                if (pauseMenuHasFocus) {
+                    super.dispatchKeyEvent(event)
+                } else {
+                    togglePlayPause()
+                    true
+                }
+            }
+
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                if (pauseMenuHasFocus) super.dispatchKeyEvent(event)
+                else {
+                    playerController?.seekBackward()
+                    true
+                }
+            }
+
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                if (pauseMenuHasFocus) super.dispatchKeyEvent(event)
+                else {
+                    playerController?.seekForward()
+                    true
+                }
+            }
+
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                playerController?.previousVideo()
+                true
+            }
+
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                playerController?.nextVideo()
+                true
+            }
+
+            KeyEvent.KEYCODE_INFO -> {
+                showInfoDialog()
+                true
+            }
+
+            else -> super.dispatchKeyEvent(event)
+        }
+    }
+
+    private fun isDescendantOf(view: View, ancestor: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === ancestor) return true
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    private fun togglePlayPause() {
+        playerController?.togglePlayPause()
+        updatePauseOverlay()
+    }
 
     private fun hasTreePermission(): Boolean {
         return contentResolver.persistedUriPermissions.any { it.isReadPermission }
           }
 
     private fun launchPicker() {
+        if (isTelevision) {
+            launchUsbPicker()
+            return
+        }
+        try {
         if (hasTreePermission()) {
             filePicker.launch(arrayOf("video/*", "audio/*"))
               } else {
             treePicker.launch(null)
               }
+        } catch (_: ActivityNotFoundException) {
+            launchUsbPicker()
+        }
           }
+
+    private fun launchUsbPicker() {
+        if (Environment.isExternalStorageManager()) {
+            usbBrowser.open()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.usb_permission_title)
+            .setMessage(R.string.usb_permission_message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.usb_open_settings) { _, _ ->
+                val intents = listOf(
+                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:$packageName")),
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                )
+                var launched = false
+                for (intent in intents) {
+                    try {
+                        storageSettings.launch(intent)
+                        launched = true
+                        break
+                    } catch (_: ActivityNotFoundException) {
+                        // Some TV settings apps only provide the global settings page.
+                    } catch (_: SecurityException) {
+                        // Try the other documented settings entry point.
+                    }
+                }
+                if (!launched) {
+                    AlertDialog.Builder(this)
+                        .setMessage(R.string.usb_settings_unavailable)
+                        .setPositiveButton(android.R.string.ok, null).show()
+                }
+            }.show()
+    }
 
     private fun onTreeSelected(treeUri: Uri) {
         Log.d(TAG, "onTreeSelected: treeUri=$treeUri")
@@ -229,7 +418,10 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("ClickableViewAccessibility")
     private fun startPlayback(videos: List<VideoItem>, startIndex: Int = 0) {
         stopPlayback()
-        val controller = PlayerController(this)
+        val controller = PlayerController(
+            this,
+            onPlaybackFailure = if (isTelevision) ({ error -> showPlaybackError(error) }) else null
+        )
         playerController = controller
         playerView.player = controller.player
 
@@ -269,6 +461,8 @@ class MainActivity : AppCompatActivity() {
                 pauseOverlay.visibility = if (isPlaying) View.GONE else View.VISIBLE
                 if (!isPlaying) {
                     updatePauseOverlay()
+                } else if (isTelevision) {
+                    playerView.requestFocus()
                 }
              }
                })
@@ -276,6 +470,8 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "startPlayback: calling setPlaylist, videos=${videos.size}")
         controller.setPlaylist(videos, startIndex)
         playerView.keepScreenOn = true
+        playerView.isFocusable = isTelevision
+        if (isTelevision) playerView.requestFocus()
         Log.d(TAG, "startPlayback: calling updatePortraitVideoInfo")
         updatePortraitVideoInfo()
 
@@ -295,6 +491,8 @@ class MainActivity : AppCompatActivity() {
           }
 
     private fun stopPlayback() {
+        playbackErrorDialog?.dismiss()
+        playbackErrorDialog = null
         playerView.keepScreenOn = false
         pauseOverlay.visibility = View.GONE
         bitPerfectAudio?.release()
@@ -305,6 +503,39 @@ class MainActivity : AppCompatActivity() {
         gestureDetector = null
         viewModel.isPlayerScreen = false
           }
+
+    private fun showPlaybackError(error: androidx.media3.common.PlaybackException) {
+        if (isFinishing || isDestroyed) return
+        val player = playerController?.player ?: return
+        player.pause()
+        val filename = viewModel.videos.getOrNull(player.currentMediaItemIndex)?.displayName.orEmpty()
+        val details = buildString {
+            appendLine(filename)
+            appendLine()
+            appendLine("${error.errorCodeName} (${error.errorCode})")
+            var cause: Throwable? = error
+            repeat(5) {
+                val current = cause ?: return@repeat
+                appendLine("${current.javaClass.simpleName}: ${current.message.orEmpty()}")
+                cause = current.cause
+            }
+        }.trim()
+        playbackErrorDialog?.dismiss()
+        playbackErrorDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.playback_failed)
+            .setMessage(details)
+            .setPositiveButton(R.string.playback_retry) { _, _ ->
+                player.prepare()
+                player.play()
+            }
+            .setNegativeButton(R.string.playback_choose_another) { _, _ ->
+                stopPlayback()
+                showFolderSelect()
+                launchPicker()
+            }
+            .setNeutralButton(android.R.string.cancel, null)
+            .show()
+    }
 
     private fun showInfoDialog() {
         val player = playerController?.player ?: return
@@ -334,12 +565,15 @@ class MainActivity : AppCompatActivity() {
     private fun updatePauseOverlay() {
         Log.d(TAG, "updatePauseOverlay: player=${playerController?.player != null}, playing=${playerController?.player?.isPlaying}")
         val playing = playerController?.player?.isPlaying == true
+        pauseOverlay.visibility = if (playing) View.GONE else View.VISIBLE
         if (!playing) {
             val index = playerController?.player?.currentMediaItemIndex ?: 0
             val video = viewModel.videos.getOrNull(index)
             overlayFilename.text = video?.displayName ?: ""
+            if (isTelevision && currentFocus?.let { isDescendantOf(it, pauseOverlay) } != true) {
+                overlayPlayPauseButton.requestFocus()
+            }
                }
-        pauseOverlay.visibility = if (playing) View.GONE else View.VISIBLE
           }
 
 @OptIn(UnstableApi::class)
@@ -423,6 +657,7 @@ private fun updatePortraitVideoInfo() {
         viewModel.isPlayerScreen = false
         playerContainer.visibility = View.GONE
         folderSelectContainer.visibility = View.VISIBLE
+        if (isTelevision) selectFolderButton.requestFocus()
         exitImmersiveMode()
           }
 
@@ -459,6 +694,7 @@ private fun updatePortraitVideoInfo() {
 
     override fun onDestroy() {
         super.onDestroy()
+        if (::usbBrowser.isInitialized) usbBrowser.close()
         stopPlayback()
           }
 }

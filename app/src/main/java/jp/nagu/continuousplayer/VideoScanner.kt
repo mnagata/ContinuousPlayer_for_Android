@@ -5,8 +5,27 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import java.text.Collator
 import java.util.Locale
+import java.io.File
 
 class VideoScanner(private val context: Context) {
+
+    companion object {
+        // macOS AppleDouble sidecars retain the media extension but contain metadata.
+        fun isSupportedFile(name: String): Boolean =
+            !name.startsWith("._") &&
+                name.substringAfterLast('.', "").lowercase(Locale.ROOT) in
+                setOf("mp4", "m4v", "mp3", "flac", "m4a", "aac", "wav", "ogg", "opus")
+    }
+
+    fun scanDirectory(directory: File): List<VideoItem> {
+        val files = directory.listFiles()
+            ?: throw java.io.IOException("Cannot read directory: ${directory.path}")
+        return sortLikeSafThenReorderOpEd(files.filter {
+            it.isFile && isSupportedFile(it.name)
+        }.map {
+            VideoItem(Uri.fromFile(it).toString(), it.name, it.length(), it.lastModified())
+        })
+    }
 
     private val collator: Collator = Collator.getInstance(Locale.getDefault()).apply {
         strength = Collator.SECONDARY
@@ -63,16 +82,7 @@ class VideoScanner(private val context: Context) {
 
         val filtered = allFiles.filter { doc ->
             val name = doc.name ?: return@filter false
-            val isVideoFile = name.endsWith(".mp4", ignoreCase = true) ||
-                name.endsWith(".m4v", ignoreCase = true) ||
-                name.endsWith(".mp3", ignoreCase = true) ||
-                name.endsWith(".flac", ignoreCase = true) ||
-                name.endsWith(".m4a", ignoreCase = true) ||
-                name.endsWith(".aac", ignoreCase = true) ||
-                name.endsWith(".wav", ignoreCase = true) ||
-                name.endsWith(".ogg", ignoreCase = true) ||
-                name.endsWith(".opus", ignoreCase = true)
-            return@filter isVideoFile
+            doc.isFile && isSupportedFile(name)
         }.map { doc ->
             VideoItem(
                 uri = doc.uri.toString(),
