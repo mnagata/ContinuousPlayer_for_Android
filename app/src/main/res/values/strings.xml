@@ -5,4 +5,23 @@
     <string name="exit_app">Exit</string>
     <string name="info">情報</string>
     <string name="no_mp4_found">No mp4 files found in this folder</string>
+    <string name="resume_playback">Resume playback</string>
+    <string name="tv_controls_hint">Remote: Left/Right seek · Up/Down previous/next · OK play/pause</string>
+    <string name="home_eyebrow">ANIME OPENINGS / ENDINGS</string>
+    <string name="home_select">OP / EDを選ぶ</string>
+    <string name="usb_permission_title">USBメモリーへのアクセス</string>
+    <string name="usb_permission_message">TVのUSBメモリーからフォルダーを選ぶため、設定でContinuousPlayerの「すべてのファイルへのアクセス」を許可してください。この許可は共有ストレージ全体の読み書きを可能にしますが、このアプリは再生用の読み取りだけを行います。許可したら戻るボタンでアプリに戻ってください。</string>
+    <string name="usb_open_settings">設定を開く</string>
+    <string name="usb_permission_denied">許可されていません。USBを開くには、もう一度選択ボタンからアクセスを許可してください。</string>
+    <string name="usb_settings_unavailable">この端末ではアクセス許可の設定画面を開けません。端末の設定 → アプリ → 特別なアプリアクセス → すべてのファイルへのアクセスでContinuousPlayerを許可し、アプリに戻って選択ボタンを押してください。設定項目の名前は端末により異なります。</string>
+    <string name="usb_choose_drive">USB / 外部ストレージを選ぶ</string>
+    <string name="usb_refresh">再読み込み</string>
+    <string name="usb_no_drive">USBメモリーが見つかりません。接続し、端末が認識するまで待ってから再読み込みしてください。</string>
+    <string name="usb_parent">↑ 上の階層へ</string>
+    <string name="usb_empty">このフォルダーに対応する動画・音声ファイルはありません。</string>
+    <string name="usb_loading">USBを読み込んでいます…</string>
+    <string name="usb_read_error">USBを読み取れません。接続状態とアクセス許可を確認してください。</string>
+    <string name="playback_failed">再生できませんでした</string>
+    <string name="playback_retry">再試行</string>
+    <string name="playback_choose_another">別のファイルを選ぶ</string>
 </resources>

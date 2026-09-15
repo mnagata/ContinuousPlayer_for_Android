@@ -37,7 +37,7 @@
       </SelectionState>
       <SelectionState runConfigName="unitTest">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-07-30T13:54:27.851241Z">
+        <DropdownSelection timestamp="2026-09-15T01:19:43.451188Z">
           <Target type="DEFAULT_BOOT">
             <handle>
               <DeviceId pluginId="PhysicalDevice" identifier="serial=HQ665S016F" />

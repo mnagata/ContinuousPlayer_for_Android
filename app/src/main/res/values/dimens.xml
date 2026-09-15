@@ -1,0 +1,5 @@
+<resources>
+    <dimen name="home_logo_size">180dp</dimen>
+    <dimen name="home_padding">32dp</dimen>
+    <dimen name="home_title_size">32sp</dimen>
+</resources>

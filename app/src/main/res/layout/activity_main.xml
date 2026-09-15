@@ -5,35 +5,94 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-     <!-- Folder select screen -->
+     <!-- Brand-led landing screen; scrolling also supports small landscape windows. -->
      <LinearLayout
         android:id="@+id/folder_select_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:visibility="visible">
+        android:background="@drawable/home_background"
+        android:orientation="vertical">
 
-         <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
-            android:text="@string/app_name"
-            android:textColor="@android:color/white"
-            android:textSize="24sp" />
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:clipToPadding="false">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:paddingHorizontal="28dp"
+                android:paddingVertical="@dimen/home_padding">
 
-         <Button
-            android:id="@+id/btn_select_folder"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/select_folder" />
+                <ImageView
+                    android:layout_width="@dimen/home_logo_size"
+                    android:layout_height="@dimen/home_logo_size"
+                    android:src="@drawable/ic_launcher_foreground"
+                    android:importantForAccessibility="no" />
 
-         <Button
-            android:id="@+id/btn_exit"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/exit_app" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_eyebrow"
+                    android:textColor="#66DFFF"
+                    android:textSize="12sp"
+                    android:letterSpacing="0.18" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/app_name"
+                    android:textColor="#FFFFFF"
+                    android:textSize="@dimen/home_title_size"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="20sp"
+                    android:autoSizeMaxTextSize="32sp"
+                    android:autoSizeStepGranularity="1sp" />
+
+                <Button
+                    android:id="@+id/btn_select_folder"
+                    android:layout_width="280dp"
+                    android:layout_height="56dp"
+                    android:layout_marginTop="28dp"
+                    android:background="@drawable/home_primary_button"
+                    android:backgroundTint="@null"
+                    app:backgroundTint="@null"
+                    android:text="@string/home_select"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp"
+                    android:nextFocusDown="@id/btn_exit" />
+
+                <Button
+                    android:id="@+id/btn_exit"
+                    android:layout_width="280dp"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/home_secondary_button"
+                    android:backgroundTint="@null"
+                    app:backgroundTint="@null"
+                    android:text="@string/exit_app"
+                    android:textAllCaps="false"
+                    android:textColor="#CED4ED"
+                    android:nextFocusUp="@id/btn_select_folder" />
+
+                <TextView
+                    android:id="@+id/tv_controls_hint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:gravity="center"
+                    android:text="@string/tv_controls_hint"
+                    android:textColor="#9FAECD"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </ScrollView>
      </LinearLayout>
 
      <!-- Player screen -->
@@ -79,11 +138,24 @@
                 android:textSize="14sp" />
 
              <ImageButton
+                android:id="@+id/btn_overlay_play_pause"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/player_button_background"
+                android:contentDescription="@string/resume_playback"
+                android:nextFocusLeft="@id/btn_overlay_exit"
+                android:nextFocusRight="@id/btn_overlay_info"
+                android:src="@drawable/ic_play"
+                android:tooltipText="@string/resume_playback" />
+
+             <ImageButton
                 android:id="@+id/btn_overlay_info"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/player_button_background"
                 android:contentDescription="@string/info"
+                android:nextFocusLeft="@id/btn_overlay_play_pause"
+                android:nextFocusRight="@id/btn_overlay_select_folder"
                 android:src="@drawable/ic_info"
                 android:tooltipText="@string/info" />
 
@@ -91,8 +163,10 @@
                 android:id="@+id/btn_overlay_select_folder"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/player_button_background"
                 android:contentDescription="@string/select_folder"
+                android:nextFocusLeft="@id/btn_overlay_info"
+                android:nextFocusRight="@id/btn_overlay_exit"
                 android:src="@drawable/ic_folder_open"
                 android:tooltipText="@string/select_folder" />
 
@@ -101,8 +175,10 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="8dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/player_button_background"
                 android:contentDescription="@string/exit_app"
+                android:nextFocusLeft="@id/btn_overlay_select_folder"
+                android:nextFocusRight="@id/btn_overlay_play_pause"
                 android:src="@drawable/ic_close"
                 android:tooltipText="@string/exit_app" />
          </LinearLayout>
