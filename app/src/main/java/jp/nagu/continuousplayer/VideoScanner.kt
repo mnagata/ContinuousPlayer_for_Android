@@ -3,9 +3,9 @@ package jp.nagu.continuousplayer
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import java.io.File
 import java.text.Collator
 import java.util.Locale
-import java.io.File
 
 class VideoScanner(private val context: Context) {
 
@@ -26,6 +26,7 @@ class VideoScanner(private val context: Context) {
             VideoItem(Uri.fromFile(it).toString(), it.name, it.length(), it.lastModified())
         })
     }
+
 
     private val collator: Collator = Collator.getInstance(Locale.getDefault()).apply {
         strength = Collator.SECONDARY
