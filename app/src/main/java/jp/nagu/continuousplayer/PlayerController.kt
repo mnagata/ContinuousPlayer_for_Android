@@ -81,7 +81,8 @@ class PlayerController(
 
         /** 再生中ならポーズ、ポーズ中なら再生を再開する。 */
     fun togglePlayPause() {
-        if (player.isPlaying) player.pause() else player.play()
+        // Playback intent stays true while buffering or switching media items.
+        if (player.playWhenReady) player.pause() else player.play()
         }
 
         /** 指定ミリ秒だけ前方にシークする。末尾を超える場合は次の動画へスキップする。 */

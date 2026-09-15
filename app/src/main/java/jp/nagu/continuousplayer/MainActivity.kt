@@ -60,6 +60,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var overlayPlayPauseButton: ImageButton
     private lateinit var usbBrowser: UsbFileBrowser
     private var playbackErrorDialog: AlertDialog? = null
+    private var userPaused = false
+    private var isInBackground = false
 
     private val storageSettings = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -195,6 +197,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                userPaused = true
                 player.pause()
                 updatePauseOverlay()
                 true
@@ -443,6 +446,7 @@ class MainActivity : AppCompatActivity() {
                    ) {
                 Log.d(TAG, "onMediaItemTransition: mediaItem=$mediaItem, reason=$reason")
                 updatePortraitVideoInfo()
+                updatePauseOverlay()
                    }
 
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -456,15 +460,16 @@ class MainActivity : AppCompatActivity() {
                        }
                    }
 
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                Log.d(TAG, "onIsPlayingChanged: isPlaying=$isPlaying")
-                pauseOverlay.visibility = if (isPlaying) View.GONE else View.VISIBLE
-                if (!isPlaying) {
-                    updatePauseOverlay()
-                } else if (isTelevision) {
-                    playerView.requestFocus()
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (playWhenReady) {
+                    userPaused = false
+                } else if (!isInBackground && controller.player.playerError == null &&
+                    reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
+                ) {
+                    userPaused = true
                 }
-             }
+                updatePauseOverlay()
+            }
                })
 
         Log.d(TAG, "startPlayback: calling setPlaylist, videos=${videos.size}")
@@ -491,6 +496,7 @@ class MainActivity : AppCompatActivity() {
           }
 
     private fun stopPlayback() {
+        userPaused = false
         playbackErrorDialog?.dismiss()
         playbackErrorDialog = null
         playerView.keepScreenOn = false
@@ -507,7 +513,9 @@ class MainActivity : AppCompatActivity() {
     private fun showPlaybackError(error: androidx.media3.common.PlaybackException) {
         if (isFinishing || isDestroyed) return
         val player = playerController?.player ?: return
+        userPaused = false
         player.pause()
+        updatePauseOverlay()
         val filename = viewModel.videos.getOrNull(player.currentMediaItemIndex)?.displayName.orEmpty()
         val details = buildString {
             appendLine(filename)
@@ -563,10 +571,10 @@ class MainActivity : AppCompatActivity() {
            }
 
     private fun updatePauseOverlay() {
-        Log.d(TAG, "updatePauseOverlay: player=${playerController?.player != null}, playing=${playerController?.player?.isPlaying}")
-        val playing = playerController?.player?.isPlaying == true
-        pauseOverlay.visibility = if (playing) View.GONE else View.VISIBLE
-        if (!playing) {
+        val wasVisible = pauseOverlay.visibility == View.VISIBLE
+        val show = userPaused && !isInBackground && playerController != null
+        pauseOverlay.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) {
             val index = playerController?.player?.currentMediaItemIndex ?: 0
             val video = viewModel.videos.getOrNull(index)
             overlayFilename.text = video?.displayName ?: ""
@@ -574,6 +582,7 @@ class MainActivity : AppCompatActivity() {
                 overlayPlayPauseButton.requestFocus()
             }
                }
+        if (!show && wasVisible && isTelevision) playerView.requestFocus()
           }
 
 @OptIn(UnstableApi::class)
@@ -682,14 +691,18 @@ private fun updatePortraitVideoInfo() {
 
     override fun onStop() {
         super.onStop()
+        isInBackground = true
         playerController?.player?.pause()
+        updatePauseOverlay()
           }
 
     override fun onStart() {
         super.onStart()
+        isInBackground = false
         if (viewModel.isPlayerScreen) {
             playerController?.player?.play()
                }
+        updatePauseOverlay()
           }
 
     override fun onDestroy() {
