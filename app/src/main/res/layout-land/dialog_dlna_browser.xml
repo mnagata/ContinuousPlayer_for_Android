@@ -1,0 +1,57 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="@dimen/dlna_dialog_padding"
+    android:background="@drawable/dlna_dialog_background">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView android:id="@+id/dlna_label" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/dlna_dialog_label" android:textColor="#66DFFF" android:textSize="11sp" android:letterSpacing="0.12" />
+            <TextView android:id="@+id/dlna_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#FFFFFF" android:textSize="22sp" android:fontFamily="sans-serif-medium"
+                android:maxLines="1" android:ellipsize="end" />
+        </LinearLayout>
+        <Button android:id="@+id/dlna_up" android:layout_width="180dp" android:layout_height="48dp"
+            android:layout_marginStart="12dp" android:text="@string/usb_parent" android:textAllCaps="false"
+            android:textColor="#FFFFFF" android:textSize="14sp" android:background="@drawable/home_secondary_button"
+            android:backgroundTint="@null" android:nextFocusDown="@id/dlna_list" android:visibility="gone" />
+    </LinearLayout>
+    <TextView android:id="@+id/dlna_path" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" android:textColor="#B7C8DE" android:textSize="12sp" android:maxLines="1" android:ellipsize="middle" />
+    <TextView android:id="@+id/dlna_summary" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" android:textColor="#B7C8DE" android:textSize="12sp" />
+    <ListView android:id="@+id/dlna_list" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:layout_marginTop="4dp" android:divider="@android:color/transparent"
+        android:dividerHeight="6dp" android:listSelector="@drawable/dlna_row_selector" android:drawSelectorOnTop="false"
+        android:cacheColorHint="@android:color/transparent" android:fadeScrollbars="false" android:focusable="true"
+        android:nextFocusUp="@id/dlna_up" android:nextFocusDown="@id/dlna_refresh" />
+    <ScrollView android:id="@+id/dlna_message_container" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:fillViewport="true" android:layout_marginTop="8dp" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:gravity="center" android:padding="12dp">
+            <ProgressBar android:id="@+id/dlna_progress" style="?android:attr/progressBarStyle"
+                android:layout_width="32dp" android:layout_height="32dp" android:indeterminateTint="#66DFFF" android:visibility="gone" />
+            <TextView android:id="@+id/dlna_message" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:textColor="#D8E3F2" android:textSize="16sp" android:lineSpacingExtra="4dp" />
+        </LinearLayout>
+    </ScrollView>
+    <TextView android:id="@+id/dlna_hint" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textColor="#9BAFC9" android:textSize="12sp" android:visibility="gone" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:orientation="horizontal">
+        <Button android:id="@+id/dlna_register" android:layout_width="0dp" android:layout_height="48dp"
+            android:layout_weight="1" android:layout_marginEnd="12dp" android:visibility="gone"
+            android:text="@string/folder_register" android:textAllCaps="false" android:textSize="14sp"
+            android:textColor="#FFFFFF" android:background="@drawable/home_secondary_button" android:backgroundTint="@null"
+            android:nextFocusUp="@id/dlna_list" />
+        <Button android:id="@+id/dlna_refresh" android:layout_width="0dp" android:layout_height="48dp"
+            android:layout_weight="1" android:text="@string/usb_refresh" android:textAllCaps="false"
+            android:textColor="#FFFFFF" android:background="@drawable/home_secondary_button" android:backgroundTint="@null"
+            android:nextFocusUp="@id/dlna_list" android:nextFocusRight="@id/dlna_close" />
+        <Button android:id="@+id/dlna_close" android:layout_width="0dp" android:layout_height="48dp"
+            android:layout_weight="1" android:layout_marginStart="12dp" android:text="@string/dlna_close" android:textAllCaps="false"
+            android:textColor="#FFFFFF" android:background="@drawable/home_secondary_button" android:backgroundTint="@null"
+            android:nextFocusUp="@id/dlna_list" android:nextFocusLeft="@id/dlna_refresh" />
+    </LinearLayout>
+</LinearLayout>

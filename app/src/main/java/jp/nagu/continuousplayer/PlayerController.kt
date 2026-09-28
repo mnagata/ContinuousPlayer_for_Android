@@ -73,7 +73,9 @@ class PlayerController(
          * @param startIndex 再生開始位置（デフォルト: 0）
          */
     fun setPlaylist(videos: List<VideoItem>, startIndex: Int = 0) {
-        val items = videos.map { MediaItem.fromUri(Uri.parse(it.uri)) }
+        val items = videos.map {
+            MediaItem.Builder().setUri(Uri.parse(it.uri)).setMimeType(it.mimeType).build()
+        }
         player.setMediaItems(items, startIndex, 0L)
         player.prepare()
         player.play()

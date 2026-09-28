@@ -1,13 +1,11 @@
 package jp.nagu.continuousplayer
 
-import android.content.Context
 import android.net.Uri
-import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.text.Collator
 import java.util.Locale
 
-class VideoScanner(private val context: Context) {
+class VideoScanner {
 
     companion object {
         // macOS AppleDouble sidecars retain the media extension but contain metadata.
@@ -20,7 +18,7 @@ class VideoScanner(private val context: Context) {
     fun scanDirectory(directory: File): List<VideoItem> {
         val files = directory.listFiles()
             ?: throw java.io.IOException("Cannot read directory: ${directory.path}")
-        return sortLikeSafThenReorderOpEd(files.filter {
+        return sortMedia(files.filter {
             it.isFile && isSupportedFile(it.name)
         }.map {
             VideoItem(Uri.fromFile(it).toString(), it.name, it.length(), it.lastModified())
@@ -32,70 +30,6 @@ class VideoScanner(private val context: Context) {
         strength = Collator.SECONDARY
     }
 
-    fun scanTree(treeUri: Uri, documentUri: Uri): List<VideoItem> {
-
-        // documentUri is the parent directory URI — use it directly as scan root
-        val tree = DocumentFile.fromTreeUri(context, treeUri)
-            ?: run {
-                return emptyList()
-            }
-
-        // Find the scan root by traversing the tree from documentUri path
-        val scanRoot = try {
-            val treeDocId = treeUri.toString()
-                .substringAfter("tree/")
-                .substringBefore('?')
-                .let { Uri.decode(it) }
-
-            val docId = documentUri.toString()
-                .substringAfter("document/")
-                .substringBefore('?')
-                .let { Uri.decode(it) }
-
-            if (docId.startsWith(treeDocId)) {
-                val relativePath = docId.substring(treeDocId.length)
-                    .trimStart('/')
-                if (relativePath.isNotEmpty()) {
-                    var current: DocumentFile? = tree
-                    for (seg in relativePath.split('/')) {
-                        if (current == null) break
-                        val child = current.listFiles().find {
-                            it.isDirectory && it.name == seg
-                        }
-                        current = child
-                    }
-                    current
-                } else {
-                    tree
-                }
-            } else {
-                tree
-            }
-        } catch (_: Exception) {
-            tree
-        }
-
-        if (scanRoot == null) {
-            return emptyList()
-        }
-
-        val allFiles = scanRoot.listFiles()
-
-        val filtered = allFiles.filter { doc ->
-            val name = doc.name ?: return@filter false
-            doc.isFile && isSupportedFile(name)
-        }.map { doc ->
-            VideoItem(
-                uri = doc.uri.toString(),
-                displayName = doc.name ?: "unknown",
-                size = doc.length(),
-                lastModified = doc.lastModified()
-            )
-        }
-
-        return sortLikeSafThenReorderOpEd(filtered)
-	}
-
     private data class OpEdInfo(
         val baseKey: String,
         val number: Int,
@@ -104,7 +38,7 @@ class VideoScanner(private val context: Context) {
 
     private val opEdRegex = Regex("""^(.+?)\s+(OP|ED)(\d*)$""", RegexOption.IGNORE_CASE)
 
-    private fun sortLikeSafThenReorderOpEd(
+    fun sortMedia(
         items: List<VideoItem>
     ): List<VideoItem> {
         // 1. SAFの標準DocumentsUI相当の名前昇順

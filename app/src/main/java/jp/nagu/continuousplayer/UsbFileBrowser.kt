@@ -19,7 +19,11 @@ class UsbFileBrowser(
 ) {
     private var dialog: AlertDialog? = null
     private var job: Job? = null
-    private val scanner = VideoScanner(activity)
+    internal var selectedFolder: PlaybackFolder.Usb? = null
+        private set
+
+    internal fun openFolder(folder: PlaybackFolder.Usb) = browse(folder.root, folder.directory)
+    private val scanner = VideoScanner()
     private val preferences = activity.getSharedPreferences("usb_browser", android.content.Context.MODE_PRIVATE)
 
     fun close() {
@@ -121,6 +125,7 @@ class UsbFileBrowser(
                                         file.readByte()
                                     }
                                 }
+                                selectedFolder = PlaybackFolder.Usb(root, directory)
                                 onSelected(videos, videoIndex)
                             }
                         }

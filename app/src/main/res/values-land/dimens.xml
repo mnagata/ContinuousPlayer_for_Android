@@ -2,4 +2,5 @@
     <dimen name="home_logo_size">100dp</dimen>
     <dimen name="home_padding">20dp</dimen>
     <dimen name="home_title_size">28sp</dimen>
+    <dimen name="dlna_dialog_padding">12dp</dimen>
 </resources>

@@ -10,10 +10,10 @@ import android.content.res.Configuration
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
-import android.provider.DocumentsContract
 import android.util.Log
 import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
@@ -43,7 +43,6 @@ class MainActivity : AppCompatActivity() {
           }
 
     private lateinit var viewModel: PlayerViewModel
-    private lateinit var scanner: VideoScanner
 
     private var playerController: PlayerController? = null
     private var bitPerfectAudio: BitPerfectAudioManager? = null
@@ -59,6 +58,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var selectFolderButton: Button
     private lateinit var overlayPlayPauseButton: ImageButton
     private lateinit var usbBrowser: UsbFileBrowser
+    private lateinit var dlnaBrowser: DlnaBrowser
+    private lateinit var safBrowser: SafFileBrowser
     private var playbackErrorDialog: AlertDialog? = null
     private var userPaused = false
     private var isInBackground = false
@@ -81,10 +82,6 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocumentTree()
          ) { uri -> uri?.let { onTreeSelected(it) } }
 
-    private val filePicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-         ) { uri -> uri?.let { onFileSelected(it) } }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         // The system starting window uses the manifest theme; content uses the normal theme.
         setTheme(R.style.Theme_ContinuousPlayer)
@@ -102,8 +99,26 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         viewModel = ViewModelProvider(this)[PlayerViewModel::class.java]
-        scanner = VideoScanner(this)
         usbBrowser = UsbFileBrowser(this) { videos, index ->
+            if (::safBrowser.isInitialized) safBrowser.close()
+            viewModel.playbackFolder = usbBrowser.selectedFolder
+            viewModel.videos = videos
+            startPlayback(videos, index)
+            showPlayer()
+        }
+        dlnaBrowser = DlnaBrowser(this) { videos, index ->
+            viewModel.playbackFolder = dlnaBrowser.selectedFolder
+            viewModel.videos = videos
+            startPlayback(videos, index)
+            showPlayer()
+        }
+        safBrowser = SafFileBrowser(this,
+            onAddFolder = { if (isTelevision) launchUsbPicker() else launchTreePicker() },
+            onAddDlna = { dlnaBrowser.open() },
+            onDlnaFolder = { folder ->
+                dlnaBrowser.openSaved(folder) { safBrowser.openSavedFolders() }
+            }) { videos, index ->
+            viewModel.playbackFolder = safBrowser.selectedFolder
             viewModel.videos = videos
             startPlayback(videos, index)
             showPlayer()
@@ -139,7 +154,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.btn_overlay_select_folder).setOnClickListener {
             stopPlayback()
             showFolderSelect()
-            launchPicker()
+            launchPlaybackFolder()
               }
 
         findViewById<ImageButton>(R.id.btn_overlay_exit).setOnClickListener {
@@ -268,25 +283,26 @@ class MainActivity : AppCompatActivity() {
         updatePauseOverlay()
     }
 
-    private fun hasTreePermission(): Boolean {
-        return contentResolver.persistedUriPermissions.any { it.isReadPermission }
-          }
+    private fun launchPlaybackFolder() {
+        when (val folder = viewModel.playbackFolder) {
+            is PlaybackFolder.Saf -> safBrowser.openFolder(folder)
+            is PlaybackFolder.Dlna -> dlnaBrowser.openSaved(folder.folder) { safBrowser.openSavedFolders() }
+            is PlaybackFolder.Usb -> usbBrowser.openFolder(folder)
+            null -> launchPicker()
+        }
+    }
 
     private fun launchPicker() {
-        if (isTelevision) {
-            launchUsbPicker()
-            return
-        }
+        safBrowser.open()
+    }
+
+    private fun launchTreePicker() {
         try {
-        if (hasTreePermission()) {
-            filePicker.launch(arrayOf("video/*", "audio/*"))
-              } else {
             treePicker.launch(null)
-              }
         } catch (_: ActivityNotFoundException) {
             launchUsbPicker()
         }
-          }
+    }
 
     private fun launchUsbPicker() {
         if (Environment.isExternalStorageManager()) {
@@ -324,106 +340,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onTreeSelected(treeUri: Uri) {
-        Log.d(TAG, "onTreeSelected: treeUri=$treeUri")
         try {
-            contentResolver.takePersistableUriPermission(
-                treeUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                  )
-              } catch (_: SecurityException) {
-            Log.d(TAG, "takePersistableUriPermission failed")
-              }
-
-               // Tree permission acquired — now open file picker
-        filePicker.launch(arrayOf("video/*", "audio/*"))
-          }
-
-    private fun onFileSelected(fileUri: Uri) {
-        Log.d(TAG, "onFileSelected: fileUri=$fileUri")
-
-        val selectedDocId = try {
-            DocumentsContract.getDocumentId(fileUri)
-               } catch (_: Exception) { null }
-
-        val matchedTree = findMatchingTreePermission(selectedDocId)
-        if (matchedTree != null) {
-               // Extract parent directory docId of the selected file
-            val parentDocId = try {
-                val docId = selectedDocId ?: ""
-                docId.substringBeforeLast('/')
-                      } catch (_: Exception) { null }
-
-            val parentUri = parentDocId?.let { parentId ->
-                DocumentsContract.buildDocumentUri(matchedTree.authority!!, parentId)
-                      }
-
-            Log.d(TAG, "onFileSelected: matchedTree=$matchedTree, parentUri=$parentUri, parentDocId=$parentDocId, selectedDocId=$selectedDocId")
-            scanAndPlayFrom(matchedTree, parentUri, selectedDocId)
-               } else {
-            Log.d(TAG, "No matching tree, launching tree picker for permission")
-            treePicker.launch(null)
-               }
-          }
-
-    private fun findMatchingTreePermission(docId: String?): Uri? {
-        if (docId == null) return null
-        return contentResolver.persistedUriPermissions
-                   .filter { it.isReadPermission }
-                   .map { it.uri }
-                   .firstOrNull { treeUri ->
-                try {
-                    val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
-                    docId.startsWith("$treeDocId/") || docId == treeDocId
-                       } catch (_: Exception) {
-                    false
-                       }
-                   }
-          }
-
-    private fun scanAndPlayFrom(treeUri: Uri, parentDirUri: Uri?, selectedDocId: String?) {
-        lifecycleScope.launch {
-            val scanUri = parentDirUri ?: treeUri
-            Log.d(TAG, "scanAndPlayFrom: scanUri=$scanUri")
-            val videos = withContext(Dispatchers.IO) {
-                scanner.scanTree(treeUri, scanUri)
-                   }
-
-            Log.d(TAG, "scanAndPlayFrom: ${videos.size} videos")
-            if (videos.isEmpty()) {
-                Toast.makeText(this@MainActivity, "No video files found", Toast.LENGTH_SHORT).show()
-                return@launch
-                   }
-
-            viewModel.videos = videos
-            val startIndex = findStartIndex(videos, selectedDocId)
-            startPlayback(videos, startIndex)
-            showPlayer()
-               }
-          }
-
-    private fun findStartIndex(videos: List<VideoItem>, selectedDocId: String?): Int {
-        if (selectedDocId == null) return 0
-        val index = videos.indexOfFirst { video ->
-            try {
-                val videoDocId = DocumentsContract.getDocumentId(Uri.parse(video.uri))
-                videoDocId == selectedDocId
-                   } catch (_: Exception) {
-                false
-                   }
-               }
-        if (index >= 0) return index
-        val selectedName = selectedDocId.substringAfterLast('/')
-        return videos.indexOfFirst {
-            it.displayName.equals(selectedName, ignoreCase = true)
-               }.coerceAtLeast(0)
-          }
+            contentResolver.takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Folder access could not be persisted", error)
+            Toast.makeText(this, R.string.saf_permission_not_saved, Toast.LENGTH_LONG).show()
+        }
+        safBrowser.open(treeUri)
+    }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun startPlayback(videos: List<VideoItem>, startIndex: Int = 0) {
         stopPlayback()
         val controller = PlayerController(
             this,
-            onPlaybackFailure = if (isTelevision) ({ error -> showPlaybackError(error) }) else null
+            onPlaybackFailure = if (isTelevision || videos.any { it.uri.startsWith("http") })
+                ({ error -> showPlaybackError(error) }) else null
         )
         playerController = controller
         playerView.player = controller.player
@@ -539,7 +471,7 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton(R.string.playback_choose_another) { _, _ ->
                 stopPlayback()
                 showFolderSelect()
-                launchPicker()
+                launchPlaybackFolder()
             }
             .setNeutralButton(android.R.string.cancel, null)
             .show()
@@ -555,18 +487,19 @@ class MainActivity : AppCompatActivity() {
             val audioInfo = withContext(Dispatchers.IO) {
                 bitPerfectAudio?.getAudioOutputInfo(videoUri) ?: ""
                    }
-            val message = buildString {
-                appendLine(video.displayName)
-                if (audioInfo.isNotEmpty()) {
-                    appendLine()
-                    append(audioInfo)
-                       }
-                   }
-            AlertDialog.Builder(this@MainActivity)
-                   .setTitle(R.string.info)
-                   .setMessage(message)
-                   .setPositiveButton(android.R.string.ok, null)
-                   .show()
+            if (isFinishing || isDestroyed) return@launch
+            val content = LayoutInflater.from(this@MainActivity)
+                .inflate(R.layout.dialog_playback_info, null)
+            content.findViewById<TextView>(R.id.info_filename).text = video.displayName
+            content.findViewById<TextView>(R.id.info_audio).apply {
+                text = audioInfo
+                visibility = if (audioInfo.isEmpty()) View.GONE else View.VISIBLE
+            }
+            val dialog = AlertDialog.Builder(this@MainActivity).create()
+            dialog.setView(content, 0, 0, 0, 0)
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+            content.findViewById<Button>(R.id.info_close).setOnClickListener { dialog.dismiss() }
+            dialog.show()
                }
            }
 
@@ -643,6 +576,7 @@ private fun updatePortraitVideoInfo() {
 
     private fun formatFileSize(bytes: Long): String {
         return when {
+            bytes < 0 -> getString(R.string.dlna_unknown_size)
             bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)
             bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
             bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
@@ -652,6 +586,8 @@ private fun updatePortraitVideoInfo() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (::dlnaBrowser.isInitialized) dlnaBrowser.onConfigurationChanged()
+        if (::safBrowser.isInitialized) safBrowser.onConfigurationChanged()
         updatePortraitVideoInfo()
           }
 
@@ -708,6 +644,8 @@ private fun updatePortraitVideoInfo() {
     override fun onDestroy() {
         super.onDestroy()
         if (::usbBrowser.isInitialized) usbBrowser.close()
+        if (::dlnaBrowser.isInitialized) dlnaBrowser.close()
+        if (::safBrowser.isInitialized) safBrowser.close()
         stopPlayback()
           }
 }

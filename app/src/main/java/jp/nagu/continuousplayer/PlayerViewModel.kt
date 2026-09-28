@@ -10,5 +10,6 @@ import androidx.lifecycle.ViewModel
  */
 class PlayerViewModel : ViewModel() {
     var videos: List<VideoItem> = emptyList()
+    internal var playbackFolder: PlaybackFolder? = null
     var isPlayerScreen: Boolean = false
 }

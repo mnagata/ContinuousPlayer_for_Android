@@ -1,0 +1,19 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp"
+    android:orientation="horizontal" android:gravity="center_vertical"
+    android:paddingHorizontal="16dp" android:paddingVertical="8dp"
+    android:descendantFocusability="blocksDescendants" android:importantForAccessibility="yes">
+    <ImageView android:id="@+id/dlna_row_icon" android:layout_width="28dp" android:layout_height="28dp"
+        android:importantForAccessibility="no" app:tint="#66DFFF" />
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+        android:layout_marginStart="16dp" android:orientation="vertical" android:importantForAccessibility="noHideDescendants">
+        <TextView android:id="@+id/dlna_row_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="#FFFFFF" android:textSize="20sp" android:maxLines="2" android:ellipsize="end" />
+        <TextView android:id="@+id/dlna_row_detail" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" android:textColor="#B7C8DE" android:textSize="14sp"
+            android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
+    <TextView android:layout_width="24dp" android:layout_height="wrap_content" android:layout_marginStart="12dp"
+        android:text="›" android:textColor="#66DFFF" android:textSize="28sp" android:gravity="center"
+        android:importantForAccessibility="no" />
+</LinearLayout>
