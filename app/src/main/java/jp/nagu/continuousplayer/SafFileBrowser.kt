@@ -113,7 +113,7 @@ class SafFileBrowser(
             val dlna = savedFolders.all().sortedBy { it.serverName + it.title }
             showDialog(DlnaDialogContent(
                 title = activity.getString(R.string.saf_choose_folder),
-                label = R.string.saved_folder_dialog_label,
+                label = null,
                 hint = R.string.saved_folder_hint,
                 rows = roots.map { DlnaRow(it.second, R.drawable.ic_folder_open,
                     detail = activity.getString(R.string.saved_folder_local)) } + dlna.map {
@@ -191,14 +191,13 @@ class SafFileBrowser(
         }
         showDialog(DlnaDialogContent(
             title = path.last().title,
-            path = path.joinToString("  /  ") { it.title },
-            summary = activity.getString(R.string.dlna_folder_count, folders.size, media.size),
+            label = null,
+            fileSelection = true,
             rows = rows,
             message = activity.getString(R.string.usb_empty),
             initialSelection = folders.indexOfFirst { it.uri == focusUri }.coerceAtLeast(0),
             upLabel = if (path.size == 1) R.string.saf_folder_list else R.string.usb_parent,
             onUp = { parent(path) },
-            onRefresh = { browse(path) },
             onClose = { close() },
             onSelected = { index ->
                 if (index < folders.size) browse(path + folders[index])
@@ -229,7 +228,7 @@ class SafFileBrowser(
 
     private fun load(retry: () -> Unit, onUp: (() -> Unit)? = null, action: suspend () -> Unit) {
         job?.cancel()
-        showDialog(DlnaDialogContent(
+        if (dialog?.keepFileListWhileLoading() != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.saf_dialog_label),
             message = activity.getString(R.string.saf_loading), loading = true,
             onUp = onUp, onClose = { close() }))

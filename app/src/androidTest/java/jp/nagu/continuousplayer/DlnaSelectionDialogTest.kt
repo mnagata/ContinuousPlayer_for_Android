@@ -69,7 +69,7 @@ class DlnaSelectionDialogTest {
                 activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 dialog = DlnaSelectionDialog(activity, fixtureContent().copy(
                     label = R.string.saf_dialog_label, hint = R.string.dlna_touch_hint,
-                    title = "SAF コレクション", path = "許可済みフォルダー / アニメ",
+                    title = "SAF コレクション",
                     upLabel = R.string.saf_folder_list))
                 dialog.show()
             }
@@ -82,13 +82,81 @@ class DlnaSelectionDialogTest {
                 scenario.onActivity {
                     dialog.refreshForConfiguration()
                     assertEquals("フォルダー / SAF", dialog.findViewById<android.widget.TextView>(R.id.dlna_label).text.toString())
-                    assertEquals("↑ 保存済みフォルダーへ", dialog.findViewById<android.widget.Button>(R.id.dlna_up).text.toString())
+                    val up = dialog.findViewById<android.widget.Button>(R.id.dlna_up)
+                    assertEquals("", up.text.toString())
+                    assertNotNull(up.compoundDrawablesRelative[0])
+                    assertEquals("↑ 保存済みフォルダーへ", up.contentDescription.toString())
                     assertEquals(6, dialog.findViewById<ListView>(R.id.dlna_list).count)
                 }
                 idle()
+                scenario.onActivity {
+                    val up = dialog.findViewById<View>(R.id.dlna_up)
+                    val refresh = dialog.findViewById<View>(R.id.dlna_refresh)
+                    val close = dialog.findViewById<View>(R.id.dlna_close)
+                    val title = dialog.findViewById<View>(R.id.dlna_title)
+                    assertSame(up.parent, refresh.parent)
+                    assertSame(up.parent, close.parent)
+                    assertEquals(up.top, refresh.top)
+                    assertEquals(up.top, close.top)
+                    assertTrue(up.right <= close.left)
+                    assertTrue(close.right <= title.left)
+                    assertTrue(title.right <= refresh.left)
+                    assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_bottom_actions).visibility)
+                }
                 screenshot(name)
             }
             scenario.onActivity { dialog.dismiss() }
+        }
+    }
+
+    @Test
+    fun directoryLoadingKeepsListVisibleAndCancelAvailable() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            var selected = false
+            var closed = false
+            scenario.onActivity { activity ->
+                dialog = fixture(activity, onClose = { closed = true }, onSelected = { selected = true })
+                dialog.show()
+            }
+            idle()
+            scenario.onActivity {
+                val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                val adapter = list.adapter
+                val position = list.firstVisiblePosition
+                val title = dialog.findViewById<android.widget.TextView>(R.id.dlna_title)
+                assertTrue(dialog.keepFileListWhileLoading())
+                assertSame(adapter, list.adapter)
+                assertEquals(position, list.firstVisiblePosition)
+                assertEquals("アニメ OP / ED", title.text.toString())
+                assertTrue(list.isShown)
+                assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_progress).visibility)
+                assertFalse(list.isEnabled)
+                assertFalse(dialog.findViewById<View>(R.id.dlna_up).isEnabled)
+                assertFalse(dialog.findViewById<View>(R.id.dlna_refresh).isEnabled)
+                assertTrue(dialog.findViewById<View>(R.id.dlna_close).isEnabled)
+                list.performItemClick(list.getChildAt(0), 0, 0)
+                assertFalse(selected)
+
+                // Rebuilding the layout during a request must not reactivate stale rows.
+                dialog.refreshForConfiguration()
+                assertFalse(dialog.findViewById<ListView>(R.id.dlna_list).isEnabled)
+                dialog.updateContent(fixtureContent().copy(title = "子フォルダー"))
+                assertEquals("子フォルダー", dialog.findViewById<android.widget.TextView>(R.id.dlna_title).text.toString())
+                assertTrue(dialog.findViewById<ListView>(R.id.dlna_list).isEnabled)
+                assertTrue(dialog.findViewById<View>(R.id.dlna_up).isEnabled)
+
+                assertTrue(dialog.keepFileListWhileLoading())
+                dialog.updateContent(DlnaDialogContent(title = "接続エラー", message = "再試行できます",
+                    onRefresh = {}, onClose = {}))
+                assertTrue(dialog.findViewById<View>(R.id.dlna_refresh).isEnabled)
+                assertFalse(dialog.keepFileListWhileLoading())
+                dialog.updateContent(fixtureContent(onClose = { closed = true }))
+                assertTrue(dialog.keepFileListWhileLoading())
+            }
+            tap(dialog, R.id.dlna_close)
+            assertTrue(closed)
+            assertFalse(dialog.isShowing)
         }
     }
 
@@ -203,6 +271,20 @@ class DlnaSelectionDialogTest {
             scenario.onActivity {
                 dialog.findViewById<ListView>(R.id.dlna_list).apply {
                     requestFocusFromTouch()
+                    setSelection(0)
+                }
+            }
+            sendKey(KeyEvent.KEYCODE_DPAD_UP)
+            scenario.onActivity { assertSame(dialog.findViewById<View>(R.id.dlna_up), dialog.currentFocus) }
+            sendKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            scenario.onActivity { assertSame(dialog.findViewById<View>(R.id.dlna_close), dialog.currentFocus) }
+            sendKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            scenario.onActivity { assertSame(dialog.findViewById<View>(R.id.dlna_refresh), dialog.currentFocus) }
+            sendKey(KeyEvent.KEYCODE_DPAD_DOWN)
+            scenario.onActivity { assertSame(dialog.findViewById<View>(R.id.dlna_list), dialog.currentFocus) }
+            scenario.onActivity {
+                dialog.findViewById<ListView>(R.id.dlna_list).apply {
+                    requestFocusFromTouch()
                     setSelection(1)
                 }
             }
@@ -285,8 +367,7 @@ class DlnaSelectionDialogTest {
     private fun fixtureContent(initialSelection: Int = 0, onUp: () -> Unit = {}, onClose: () -> Unit = {},
                                onSelected: (Int) -> Unit = {}) = DlnaDialogContent(
         title = "アニメ OP / ED",
-        path = "DiskStation  /  ビデオ  /  フォルダー  /  アニメ OP・ED コレクション",
-        summary = "フォルダー 2件 · 動画・音声 4件",
+        fileSelection = true,
         rows = listOf(
             DlnaRow("2026年 秋アニメ", R.drawable.ic_folder_open),
             DlnaRow("お気に入り", R.drawable.ic_folder_open),

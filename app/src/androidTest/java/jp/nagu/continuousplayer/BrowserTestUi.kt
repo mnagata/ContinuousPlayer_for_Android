@@ -30,7 +30,9 @@ internal object BrowserTestUi {
         while (SystemClock.uptimeMillis() < deadline) {
             instrumentation.waitForIdleSync()
             val nodes = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(title).orEmpty()
-            val node = nodes.firstOrNull { it.text?.toString() == title && it.isVisibleToUser }
+            val node = nodes.firstOrNull {
+                (it.text?.toString() == title || it.contentDescription?.toString() == title) && it.isVisibleToUser
+            }
             if (node != null) {
                 val bounds = Rect()
                 node.getBoundsInScreen(bounds)

@@ -19,6 +19,8 @@
     <string name="usb_refresh">再読み込み</string>
     <string name="usb_no_drive">USBメモリーが見つかりません。接続し、端末が認識するまで待ってから再読み込みしてください。</string>
     <string name="usb_parent">↑ 上の階層へ</string>
+    <string name="file_browser_cancel">キャンセル</string>
+    <string name="file_browser_hint">ファイルを選ぶと、このフォルダー内の動画・音声を選択位置から連続再生します。</string>
     <string name="usb_empty">このフォルダーに対応する動画・音声ファイルはありません。</string>
     <string name="usb_loading">USBを読み込んでいます…</string>
     <string name="usb_read_error">USBを読み取れません。接続状態とアクセス許可を確認してください。</string>
@@ -39,7 +41,6 @@
     <string name="dlna_close">閉じる</string>
     <string name="dlna_server_list">↑ サーバー一覧へ</string>
     <string name="dlna_server_count">サーバー %1$d台</string>
-    <string name="dlna_folder_count">フォルダー %1$d件 · 動画・音声 %2$d件</string>
     <string name="dlna_server_detail">DLNAサーバー · %1$s</string>
     <string name="dlna_folder_detail">フォルダーを開く</string>
     <string name="dlna_video_detail">動画 · ここから連続再生</string>
@@ -48,7 +49,7 @@
     <string name="dlna_touch_hint">フォルダーを開き、再生を始めるファイルを選んでください。</string>
     <string name="dlna_server_hint">同じLANにあるNASを選んでください。</string>
     <string name="saf_dialog_label">フォルダー / SAF</string>
-    <string name="saf_choose_folder">保存済みフォルダーを選ぶ</string>
+    <string name="saf_choose_folder">保存済みフォルダー</string>
     <string name="saf_add_folder">フォルダーを追加</string>
     <string name="saf_folder_list">↑ 保存済みフォルダーへ</string>
     <string name="saf_no_folder">保存済みのフォルダーがありません。「フォルダーを追加」から選んでください。</string>

@@ -2,23 +2,22 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:padding="@dimen/dlna_dialog_padding"
     android:background="@drawable/dlna_dialog_background">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center_vertical">
-        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-            android:orientation="vertical">
-            <TextView android:id="@+id/dlna_label" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="@string/dlna_dialog_label" android:textColor="#66DFFF" android:textSize="11sp" android:letterSpacing="0.12" />
-            <TextView android:id="@+id/dlna_title" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="#FFFFFF" android:textSize="22sp" android:fontFamily="sans-serif-medium"
-                android:maxLines="1" android:ellipsize="end" />
-        </LinearLayout>
-        <Button android:id="@+id/dlna_up" android:layout_width="180dp" android:layout_height="48dp"
-            android:layout_marginStart="12dp" android:text="@string/usb_parent" android:textAllCaps="false"
+    <LinearLayout android:id="@+id/dlna_heading" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="vertical">
+        <TextView android:id="@+id/dlna_label" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="@string/dlna_dialog_label" android:textColor="#66DFFF" android:textSize="11sp" android:letterSpacing="0.12" />
+        <TextView android:id="@+id/dlna_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="#FFFFFF" android:textSize="22sp" android:fontFamily="sans-serif-medium"
+            android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
+
+    <LinearLayout android:id="@+id/dlna_top_actions" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical">
+        <Button android:id="@+id/dlna_up" android:layout_width="match_parent" android:layout_height="48dp"
+            android:minWidth="48dp" android:padding="0dp" android:text="@string/usb_parent" android:textAllCaps="false"
             android:textColor="#FFFFFF" android:textSize="14sp" android:background="@drawable/home_secondary_button"
             android:backgroundTint="@null" android:nextFocusDown="@id/dlna_list" android:visibility="gone" />
     </LinearLayout>
-    <TextView android:id="@+id/dlna_path" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="4dp" android:textColor="#B7C8DE" android:textSize="12sp" android:maxLines="1" android:ellipsize="middle" />
     <TextView android:id="@+id/dlna_summary" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="4dp" android:textColor="#B7C8DE" android:textSize="12sp" />
     <ListView android:id="@+id/dlna_list" android:layout_width="match_parent" android:layout_height="0dp"
@@ -38,7 +37,7 @@
     </ScrollView>
     <TextView android:id="@+id/dlna_hint" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:textColor="#9BAFC9" android:textSize="12sp" android:visibility="gone" />
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+    <LinearLayout android:id="@+id/dlna_bottom_actions" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="8dp" android:orientation="horizontal">
         <Button android:id="@+id/dlna_register" android:layout_width="0dp" android:layout_height="48dp"
             android:layout_weight="1" android:layout_marginEnd="12dp" android:visibility="gone"

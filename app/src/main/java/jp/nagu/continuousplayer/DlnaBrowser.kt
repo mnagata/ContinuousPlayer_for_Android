@@ -118,8 +118,8 @@ class DlnaBrowser(
         }
         val content = DlnaDialogContent(
             title = path.last().title,
-            path = path.joinToString("  /  ") { it.title },
-            summary = activity.getString(R.string.dlna_folder_count, folders.size, videos.size),
+            label = null,
+            fileSelection = true,
             rows = rows,
             message = activity.getString(R.string.dlna_empty),
             initialSelection = folders.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
@@ -129,7 +129,7 @@ class DlnaBrowser(
             onRefresh = { browse(server, path) },
             registerLabel = if (savedFolders.contains(server.id, path.last().id))
                 R.string.folder_unregister else R.string.folder_register,
-            onRegister = { toggleSavedFolder(server, path) },
+            onRegister = if (returnToSavedFolders == null) ({ toggleSavedFolder(server, path) }) else null,
             onClose = { close() },
             onSelected = { index ->
                 when {
@@ -175,7 +175,7 @@ class DlnaBrowser(
     private fun load(message: Int, retry: () -> Unit, action: suspend () -> Unit) {
         // Cancel only the old request. Keep the browser window attached while changing content.
         job?.cancel()
-        showDialog(DlnaDialogContent(
+        if (dialog?.keepFileListWhileLoading() != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.dlna_dialog_label),
             message = activity.getString(message),
             loading = true,
