@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.core.view.doOnPreDraw
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,6 +28,54 @@ class DlnaSavedFolderTest {
                     server.controlUrl.replace("control", "Sample.mp4"), "Sample OP.mp4", 100, 0, "video/mp4")))
                 else -> error("Unexpected folder: $objectId")
             }
+        }
+    }
+
+    @Test fun selectingVideoKeepsDialogUntilPlayerFrameIsCommitted() = withStore {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            val client = FixtureClient()
+            lateinit var browser: DlnaBrowser
+            lateinit var windowView: android.view.View
+            var selected = false
+            var playerFrameCommitted = false
+            var detached = false
+            var detachedAfterPlayerFrame = false
+            scenario.onActivity { activity ->
+                browser = DlnaBrowser(activity, client) { media, index ->
+                    assertTrue("Keep the selection window attached while preparing playback", windowView.isAttachedToWindow)
+                    assertEquals("Sample OP.mp4", media[index].displayName)
+                    activity.findViewById<android.view.View>(R.id.folder_select_container).visibility = android.view.View.GONE
+                    activity.findViewById<android.view.View>(R.id.player_container).visibility = android.view.View.VISIBLE
+                    activity.window.decorView.doOnPreDraw { view ->
+                        view.viewTreeObserver.registerFrameCommitCallback { playerFrameCommitted = true }
+                    }
+                    selected = true
+                }
+                browser.open()
+            }
+            waitForText(client.server.name)
+            BrowserTestUi.tap(client.server.name)
+            waitForText("Fixture nested OP ED")
+            BrowserTestUi.tap("Fixture nested OP ED")
+            waitForText("Sample OP.mp4")
+            scenario.onActivity { activity ->
+                windowView = android.view.inspector.WindowInspector.getGlobalWindowViews().single { view ->
+                    view.findViewById<android.widget.TextView>(R.id.dlna_title)?.text?.toString() == "Fixture nested OP ED"
+                }
+                windowView.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(view: android.view.View) = Unit
+                    override fun onViewDetachedFromWindow(view: android.view.View) {
+                        detached = true
+                        detachedAfterPlayerFrame = playerFrameCommitted &&
+                            !activity.findViewById<android.view.View>(R.id.folder_select_container).isShown
+                    }
+                })
+            }
+            BrowserTestUi.tap("Sample OP.mp4")
+            BrowserTestUi.waitUntil { detached }
+            assertTrue(selected)
+            assertTrue("The home screen must be replaced before the selection window is removed", detachedAfterPlayerFrame)
+            scenario.onActivity { browser.close() }
         }
     }
 

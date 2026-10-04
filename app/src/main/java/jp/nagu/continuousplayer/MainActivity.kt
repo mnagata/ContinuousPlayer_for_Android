@@ -104,24 +104,23 @@ class MainActivity : AppCompatActivity() {
             viewModel.playbackFolder = usbBrowser.selectedFolder
             viewModel.videos = videos
             startPlayback(videos, index)
-            showPlayer()
         }
         dlnaBrowser = DlnaBrowser(this) { videos, index ->
             viewModel.playbackFolder = dlnaBrowser.selectedFolder
             viewModel.videos = videos
             startPlayback(videos, index)
-            showPlayer()
         }
         safBrowser = SafFileBrowser(this,
             onAddFolder = { if (isTelevision) launchUsbPicker() else launchTreePicker() },
             onAddDlna = { dlnaBrowser.open() },
             onDlnaFolder = { folder ->
-                dlnaBrowser.openSaved(folder) { safBrowser.openSavedFolders() }
+                dlnaBrowser.openSaved(folder, safBrowser.takeDialog()) {
+                    safBrowser.openSavedFolders(dlnaBrowser.takeDialog())
+                }
             }) { videos, index ->
             viewModel.playbackFolder = safBrowser.selectedFolder
             viewModel.videos = videos
             startPlayback(videos, index)
-            showPlayer()
         }
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
 
@@ -180,7 +179,6 @@ class MainActivity : AppCompatActivity() {
              })
 
         if (savedInstanceState != null && viewModel.isPlayerScreen) {
-            showPlayer()
             startPlayback(viewModel.videos)
              } else {
             showFolderSelect()
@@ -286,7 +284,9 @@ class MainActivity : AppCompatActivity() {
     private fun launchPlaybackFolder() {
         when (val folder = viewModel.playbackFolder) {
             is PlaybackFolder.Saf -> safBrowser.openFolder(folder)
-            is PlaybackFolder.Dlna -> dlnaBrowser.openSaved(folder.folder) { safBrowser.openSavedFolders() }
+            is PlaybackFolder.Dlna -> dlnaBrowser.openSaved(folder.folder) {
+                safBrowser.openSavedFolders(dlnaBrowser.takeDialog())
+            }
             is PlaybackFolder.Usb -> usbBrowser.openFolder(folder)
             null -> launchPicker()
         }
@@ -352,6 +352,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("ClickableViewAccessibility")
     private fun startPlayback(videos: List<VideoItem>, startIndex: Int = 0) {
         stopPlayback()
+        showPlayer()
         val controller = PlayerController(
             this,
             onPlaybackFailure = if (isTelevision || videos.any { it.uri.startsWith("http") })

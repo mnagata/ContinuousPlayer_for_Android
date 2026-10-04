@@ -39,6 +39,15 @@ class SafFileBrowser(
         dialog = null
     }
 
+    /** Transfer the attached window without revealing the activity underneath. */
+    internal fun takeDialog(): DlnaSelectionDialog? {
+        folderMenu?.dismiss()
+        folderMenu = null
+        job?.cancel()
+        job = null
+        return dialog.also { dialog = null }
+    }
+
     fun onConfigurationChanged() {
         dialog?.takeIf { it.isShowing }?.refreshForConfiguration()
         folderMenu?.takeIf { it.isShowing }?.refreshForConfiguration()
@@ -47,6 +56,12 @@ class SafFileBrowser(
     fun hasSavedDlnaFolders() = savedFolders.all().isNotEmpty()
 
     fun openSavedFolders() = showRoots()
+
+    internal fun openSavedFolders(inheritedDialog: DlnaSelectionDialog?) {
+        close()
+        dialog = inheritedDialog
+        showRoots()
+    }
 
     fun open(treeUri: Uri? = null) {
         if (treeUri != null) {
@@ -128,8 +143,8 @@ class SafFileBrowser(
                 onSelected = { index ->
                     if (index < roots.size) open(roots[index].first)
                     else {
-                        close()
                         onDlnaFolder(dlna[index - roots.size])
+                        close()
                     }
                 },
                 onLongSelected = { index ->
@@ -203,8 +218,8 @@ class SafFileBrowser(
                 if (index < folders.size) browse(path + folders[index])
                 else {
                     selectedFolder = PlaybackFolder.Saf(path.toList())
-                    close()
                     onSelected(media, index - folders.size)
+                    dialog?.closeAfterPlaybackFrame { close() }
                 }
             }))
     }
@@ -228,7 +243,7 @@ class SafFileBrowser(
 
     private fun load(retry: () -> Unit, onUp: (() -> Unit)? = null, action: suspend () -> Unit) {
         job?.cancel()
-        if (dialog?.keepFileListWhileLoading() != true) showDialog(DlnaDialogContent(
+        if (dialog?.keepListWhileLoading(onClose = { close() }) != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.saf_dialog_label),
             message = activity.getString(R.string.saf_loading), loading = true,
             onUp = onUp, onClose = { close() }))

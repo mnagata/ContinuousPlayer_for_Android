@@ -125,7 +125,7 @@ class DlnaSelectionDialogTest {
                 val adapter = list.adapter
                 val position = list.firstVisiblePosition
                 val title = dialog.findViewById<android.widget.TextView>(R.id.dlna_title)
-                assertTrue(dialog.keepFileListWhileLoading())
+                assertTrue(dialog.keepListWhileLoading())
                 assertSame(adapter, list.adapter)
                 assertEquals(position, list.firstVisiblePosition)
                 assertEquals("アニメ OP / ED", title.text.toString())
@@ -146,17 +146,65 @@ class DlnaSelectionDialogTest {
                 assertTrue(dialog.findViewById<ListView>(R.id.dlna_list).isEnabled)
                 assertTrue(dialog.findViewById<View>(R.id.dlna_up).isEnabled)
 
-                assertTrue(dialog.keepFileListWhileLoading())
+                assertTrue(dialog.keepListWhileLoading())
                 dialog.updateContent(DlnaDialogContent(title = "接続エラー", message = "再試行できます",
                     onRefresh = {}, onClose = {}))
                 assertTrue(dialog.findViewById<View>(R.id.dlna_refresh).isEnabled)
-                assertFalse(dialog.keepFileListWhileLoading())
+                assertFalse(dialog.keepListWhileLoading())
                 dialog.updateContent(fixtureContent(onClose = { closed = true }))
-                assertTrue(dialog.keepFileListWhileLoading())
+                assertTrue(dialog.keepListWhileLoading())
             }
             tap(dialog, R.id.dlna_close)
             assertTrue(closed)
             assertFalse(dialog.isShowing)
+        }
+    }
+
+    @Test
+    fun slowLoadingIndicatorSurvivesRotationAndDoesNotAppearAfterFastCompletion() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            lateinit var originalAdapter: android.widget.ListAdapter
+            scenario.onActivity { activity ->
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                dialog = fixture(activity)
+                dialog.show()
+            }
+            awaitOrientation(scenario, Configuration.ORIENTATION_PORTRAIT)
+            idle()
+            scenario.onActivity {
+                originalAdapter = dialog.findViewById<ListView>(R.id.dlna_list).adapter
+                assertTrue(dialog.keepListWhileLoading(showLoadingIndicator = true))
+                assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_pending_progress).visibility)
+            }
+            BrowserTestUi.waitUntil { dialog.findViewById<View>(R.id.dlna_pending_progress).isShown }
+            scenario.onActivity {
+                assertSame(originalAdapter, dialog.findViewById<ListView>(R.id.dlna_list).adapter)
+                assertTrue(dialog.findViewById<ListView>(R.id.dlna_list).isShown)
+            }
+            screenshot("dlna-loading-portrait.png")
+            scenario.onActivity {
+                it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            awaitOrientation(scenario, Configuration.ORIENTATION_LANDSCAPE)
+            scenario.onActivity {
+                dialog.refreshForConfiguration()
+                assertTrue(dialog.findViewById<View>(R.id.dlna_pending_progress).isShown)
+                assertFalse(dialog.findViewById<ListView>(R.id.dlna_list).isEnabled)
+                dialog.updateContent(DlnaDialogContent(title = "接続エラー", message = "再試行できます",
+                    onRefresh = {}, onClose = {}))
+                assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_pending_progress).visibility)
+                dialog.updateContent(fixtureContent())
+                assertTrue(dialog.keepListWhileLoading(showLoadingIndicator = true))
+                dialog.updateContent(fixtureContent().copy(title = "次のフォルダー"))
+            }
+            // A completed request must cancel its delayed indicator, even after the threshold.
+            SystemClock.sleep(650)
+            scenario.onActivity {
+                assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_pending_progress).visibility)
+                assertTrue(dialog.findViewById<ListView>(R.id.dlna_list).isEnabled)
+                dialog.dismiss()
+            }
         }
     }
 

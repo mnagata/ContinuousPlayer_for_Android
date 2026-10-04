@@ -3,6 +3,8 @@ package jp.nagu.continuousplayer
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -55,6 +57,15 @@ internal class DlnaSelectionDialog(
 ) : ComponentDialog(activity) {
     private lateinit var list: ListView
     private var awaitingDirectory = false
+    private var playbackCloseToken: Any? = null
+    private val loadingHandler = Handler(Looper.getMainLooper())
+    private var pendingProgressVisible = false
+    private val showPendingProgress = Runnable {
+        if (isShowing && awaitingDirectory) {
+            pendingProgressVisible = true
+            updateInteractionState()
+        }
+    }
 
     init {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -77,6 +88,8 @@ internal class DlnaSelectionDialog(
     }
 
     fun updateContent(next: DlnaDialogContent) {
+        clearPendingProgress()
+        playbackCloseToken = null
         awaitingDirectory = false
         content = next
         renderContent()
@@ -84,14 +97,34 @@ internal class DlnaSelectionDialog(
     }
 
     /** Keep the current list and scroll position visible until navigation finishes. */
-    fun keepFileListWhileLoading(): Boolean {
-        if (!isShowing || !content.fileSelection) return false
+    fun keepListWhileLoading(onClose: (() -> Unit)? = null, showLoadingIndicator: Boolean = false): Boolean {
+        if (!isShowing || (content.rows.isEmpty() && !content.fileSelection)) return false
+        clearPendingProgress()
+        if (onClose != null) content = content.copy(onClose = onClose)
+        playbackCloseToken = null
         awaitingDirectory = true
         updateInteractionState()
+        if (showLoadingIndicator) loadingHandler.postDelayed(showPendingProgress, 500L)
         return true
     }
 
+    private fun clearPendingProgress() {
+        loadingHandler.removeCallbacks(showPendingProgress)
+        pendingProgressVisible = false
+    }
+
+    fun closeAfterPlaybackFrame(onClose: () -> Unit) {
+        keepListWhileLoading()
+        val token = Any().also { playbackCloseToken = it }
+        activity.afterNextContentFrame {
+            // Cancellation or new navigation can supersede this selection before drawing.
+            if (isShowing && playbackCloseToken === token) onClose()
+        }
+    }
+
     private fun updateInteractionState() {
+        findViewById<View>(R.id.dlna_pending_progress).visibility =
+            if (awaitingDirectory && pendingProgressVisible) View.VISIBLE else View.GONE
         list.isEnabled = !awaitingDirectory
         for (id in listOf(R.id.dlna_up, R.id.dlna_refresh, R.id.dlna_register)) {
             findViewById<View>(id).isEnabled = !awaitingDirectory
@@ -132,7 +165,7 @@ internal class DlnaSelectionDialog(
         }
         val close = findViewById<Button>(R.id.dlna_close).apply {
             setText(if (current.fileSelection) R.string.file_browser_cancel else R.string.dlna_close)
-            setOnClickListener { dismiss(); current.onClose() }
+            setOnClickListener { dismiss(); content.onClose() }
         }
         val register = findViewById<Button>(R.id.dlna_register).apply {
             visibility = if (current.onRegister == null) View.GONE else View.VISIBLE
@@ -268,6 +301,12 @@ internal class DlnaSelectionDialog(
     override fun onStart() {
         super.onStart()
         updateWindowSize()
+    }
+
+    override fun onStop() {
+        clearPendingProgress()
+        updateInteractionState()
+        super.onStop()
     }
 
     private fun updateWindowSize() {

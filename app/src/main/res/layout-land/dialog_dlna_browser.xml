@@ -1,4 +1,6 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+<LinearLayout
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:padding="@dimen/dlna_dialog_padding"
     android:background="@drawable/dlna_dialog_background">
@@ -54,3 +56,8 @@
             android:nextFocusUp="@id/dlna_list" android:nextFocusLeft="@id/dlna_refresh" />
     </LinearLayout>
 </LinearLayout>
+    <ProgressBar android:id="@+id/dlna_pending_progress" style="?android:attr/progressBarStyle"
+        android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="center"
+        android:indeterminateTint="#66DFFF" android:contentDescription="@string/dlna_loading"
+        android:accessibilityLiveRegion="polite" android:visibility="gone" />
+</FrameLayout>

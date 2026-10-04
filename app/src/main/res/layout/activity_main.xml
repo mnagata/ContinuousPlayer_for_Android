@@ -107,7 +107,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             app:use_controller="false"
-            app:show_buffering="when_playing" />
+            app:show_buffering="never" />
 
          <View
             android:id="@+id/touch_overlay"

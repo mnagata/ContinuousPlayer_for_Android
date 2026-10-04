@@ -113,7 +113,7 @@ class UsbFileBrowser(
                         index <= directories.size -> browse(root, directories[index - 1])
                         else -> {
                             val videoIndex = index - directories.size - 1
-                            load {
+                            load(forPlayback = true) {
                                 withContext(Dispatchers.IO) {
                                     // canRead() alone does not prove that the USB file can be opened.
                                     java.io.RandomAccessFile(
@@ -161,7 +161,7 @@ class UsbFileBrowser(
         }
     }
 
-    private fun load(action: suspend () -> Unit) {
+    private fun load(forPlayback: Boolean = false, action: suspend () -> Unit) {
         close()
         job = activity.lifecycleScope.launch {
             val loading = AlertDialog.Builder(activity)
@@ -170,8 +170,10 @@ class UsbFileBrowser(
                 .setOnCancelListener { job?.cancel() }
                 .show()
             dialog = loading
+            var completed = false
             try {
                 action()
+                completed = true
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -183,8 +185,15 @@ class UsbFileBrowser(
                     .setPositiveButton(R.string.usb_refresh) { _, _ -> openStorage(false) }
                     .setNegativeButton(android.R.string.cancel, null).show()
             } finally {
-                loading.dismiss()
-                if (dialog === loading) dialog = null
+                if (forPlayback && completed) {
+                    activity.afterNextContentFrame {
+                        loading.dismiss()
+                        if (dialog === loading) dialog = null
+                    }
+                } else {
+                    loading.dismiss()
+                    if (dialog === loading) dialog = null
+                }
             }
         }
     }

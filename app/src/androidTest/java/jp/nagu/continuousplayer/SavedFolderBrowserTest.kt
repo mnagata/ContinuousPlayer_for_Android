@@ -4,12 +4,176 @@ import android.content.Context
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class SavedFolderBrowserTest {
+    private class DelayedDlnaClient(private val folder: SavedDlnaFolder) : DlnaClient() {
+        val ready = CompletableDeferred<Unit>()
+        @Volatile var searching = false
+        @Volatile var cancelled = false
+        override suspend fun discover(): List<DlnaServer> {
+            searching = true
+            try {
+                ready.await()
+            } catch (error: CancellationException) {
+                cancelled = true
+                throw error
+            }
+            return listOf(DlnaServer(folder.serverId, folder.serverName, "http://192.0.2.1/control", "ContentDirectory:1"))
+        }
+        override suspend fun browse(server: DlnaServer, objectId: String): List<DlnaEntry> =
+            if (objectId == "0") listOf(DlnaEntry(folder.folderId, folder.title)) else listOf(
+                DlnaEntry("media", "Sample OP.mp4", VideoItem("http://192.0.2.1/Sample.mp4", "Sample OP.mp4", 100, 0, "video/mp4")))
+    }
+
+    @Test fun savedDlnaSelectionAndReturnReuseTheSameWindowWithoutLoadingLayout() = withFixture { scenario, folder ->
+        val client = DelayedDlnaClient(folder)
+        lateinit var saf: SafFileBrowser
+        lateinit var dlna: DlnaBrowser
+        lateinit var windowView: android.view.View
+        lateinit var titleView: android.widget.TextView
+        var detachCount = 0
+        scenario.onActivity { activity ->
+            dlna = DlnaBrowser(activity, client) { _, _ -> fail("Unexpected playback") }
+            saf = SafFileBrowser(activity, onAddFolder = {}, onAddDlna = {},
+                onDlnaFolder = { chosen ->
+                    dlna.openSaved(chosen, saf.takeDialog()) { saf.openSavedFolders(dlna.takeDialog()) }
+                }, onSelected = { _, _ -> fail("Unexpected playback") })
+            saf.openSavedFolders()
+        }
+        waitForFolder(folder.title)
+        scenario.onActivity { activity ->
+            windowView = android.view.inspector.WindowInspector.getGlobalWindowViews().single { view ->
+                view.findViewById<android.widget.TextView>(R.id.dlna_title)?.text?.toString() ==
+                    activity.getString(R.string.saf_choose_folder)
+            }
+            titleView = windowView.findViewById(R.id.dlna_title)
+            windowView.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: android.view.View) = Unit
+                override fun onViewDetachedFromWindow(view: android.view.View) { detachCount++ }
+            })
+        }
+        BrowserTestUi.tap(folder.title)
+        BrowserTestUi.waitUntil { client.searching }
+        scenario.onActivity { activity ->
+            assertTrue(windowView.isAttachedToWindow)
+            assertEquals(activity.getString(R.string.saf_choose_folder), titleView.text.toString())
+            assertEquals(0, detachCount)
+            assertEquals(android.view.View.GONE, windowView.findViewById<android.view.View>(R.id.dlna_label).visibility)
+            assertEquals(android.view.View.GONE, windowView.findViewById<android.view.View>(R.id.dlna_progress).visibility)
+            assertFalse(windowView.findViewById<android.widget.ListView>(R.id.dlna_list).isEnabled)
+            assertEquals(1, android.view.inspector.WindowInspector.getGlobalWindowViews().count {
+                it.findViewById<android.view.View>(R.id.dlna_title) != null
+            })
+        }
+        BrowserTestUi.waitUntil { windowView.findViewById<android.view.View>(R.id.dlna_pending_progress).isShown }
+        scenario.onActivity { activity ->
+            assertEquals(activity.getString(R.string.saf_choose_folder), titleView.text.toString())
+            assertTrue(windowView.findViewById<android.widget.ListView>(R.id.dlna_list).isShown)
+            assertEquals(0, detachCount)
+            client.ready.complete(Unit)
+        }
+        waitForFolder("Sample OP.mp4")
+        scenario.onActivity {
+            assertTrue(windowView.isAttachedToWindow)
+            assertSame(titleView, windowView.findViewById(R.id.dlna_title))
+            assertEquals(folder.title, titleView.text.toString())
+            assertEquals(0, detachCount)
+            assertEquals(android.view.View.GONE, windowView.findViewById<android.view.View>(R.id.dlna_pending_progress).visibility)
+        }
+        BrowserTestUi.tap(R.string.usb_parent)
+        waitForFolder(folder.serverName)
+        BrowserTestUi.tap(R.string.saved_folder_list)
+        BrowserTestUi.waitForText(R.string.saf_choose_folder)
+        scenario.onActivity {
+            assertSame(titleView, windowView.findViewById(R.id.dlna_title))
+            assertEquals(0, detachCount)
+            assertTrue(windowView.findViewById<android.widget.ListView>(R.id.dlna_list).isEnabled)
+            saf.close()
+            dlna.close()
+        }
+    }
+
+    @Test fun closingTransferredSavedListCancelsDlnaDiscovery() = withFixture { scenario, folder ->
+        val client = DelayedDlnaClient(folder)
+        lateinit var saf: SafFileBrowser
+        lateinit var dlna: DlnaBrowser
+        scenario.onActivity { activity ->
+            dlna = DlnaBrowser(activity, client) { _, _ -> fail("Unexpected playback") }
+            saf = SafFileBrowser(activity, onAddFolder = {}, onAddDlna = {},
+                onDlnaFolder = { chosen ->
+                    dlna.openSaved(chosen, saf.takeDialog()) { saf.openSavedFolders(dlna.takeDialog()) }
+                }, onSelected = { _, _ -> fail("Unexpected playback") })
+            saf.openSavedFolders()
+        }
+        waitForFolder(folder.title)
+        BrowserTestUi.tap(folder.title)
+        BrowserTestUi.waitUntil { client.searching }
+        BrowserTestUi.waitUntil {
+            android.view.inspector.WindowInspector.getGlobalWindowViews().any {
+                it.findViewById<android.view.View>(R.id.dlna_pending_progress)?.isShown == true
+            }
+        }
+        BrowserTestUi.tap(R.string.dlna_close)
+        BrowserTestUi.waitUntil { client.cancelled }
+        scenario.onActivity {
+            assertTrue(android.view.inspector.WindowInspector.getGlobalWindowViews().none {
+                it.findViewById<android.view.View>(R.id.dlna_title) != null
+            })
+            saf.close()
+            dlna.close()
+        }
+    }
+
+    @Test fun openingSafFromSavedListDoesNotShowTheLoadingLayout() = withFixture { scenario, folder ->
+        lateinit var browser: SafFileBrowser
+        lateinit var windowView: android.view.View
+        var detachCount = 0
+        scenario.onActivity {
+            browser = SafFileBrowser(it, onAddFolder = {}, onAddDlna = {}, onDlnaFolder = {},
+                onSelected = { _, _ -> fail("Unexpected playback") })
+            browser.openSavedFolders()
+        }
+        waitForFolder(folder.title)
+        scenario.onActivity { activity ->
+            windowView = android.view.inspector.WindowInspector.getGlobalWindowViews().single { view ->
+                view.findViewById<android.widget.TextView>(R.id.dlna_title)?.text?.toString() ==
+                    activity.getString(R.string.saf_choose_folder)
+            }
+            windowView.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: android.view.View) = Unit
+                override fun onViewDetachedFromWindow(view: android.view.View) { detachCount++ }
+            })
+            val list = windowView.findViewById<android.widget.ListView>(R.id.dlna_list)
+            val adapter = list.adapter
+            val title = windowView.findViewById<android.widget.TextView>(R.id.dlna_title)
+            // Follow the same open(treeUri) path as tapping a saved SAF folder.
+            // An unavailable provider also verifies that failure restores the error actions.
+            browser.open(android.provider.DocumentsContract.buildTreeDocumentUri("unavailable.saf.fixture", "root"))
+            assertEquals(activity.getString(R.string.saf_choose_folder), title.text.toString())
+            assertEquals(android.view.View.GONE, windowView.findViewById<android.view.View>(R.id.dlna_progress).visibility)
+            assertTrue(list.isShown)
+            assertSame(adapter, list.adapter)
+            assertFalse(list.isEnabled)
+            assertFalse(windowView.findViewById<android.view.View>(R.id.dlna_refresh).isEnabled)
+            assertTrue(windowView.findViewById<android.view.View>(R.id.dlna_close).isEnabled)
+            assertEquals(0, detachCount)
+        }
+        BrowserTestUi.waitForText(R.string.saf_read_error)
+        scenario.onActivity {
+            assertTrue(windowView.isAttachedToWindow)
+            assertEquals(0, detachCount)
+            assertTrue(windowView.findViewById<android.view.View>(R.id.dlna_refresh).isEnabled)
+            assertTrue(windowView.findViewById<android.view.View>(R.id.dlna_up).isEnabled)
+            browser.close()
+        }
+    }
+
     @Test fun addingFolderKeepsTheWindowAttachedAndBackRestoresTheSavedList() = withFixture { scenario, folder ->
         lateinit var browser: SafFileBrowser
         lateinit var windowView: android.view.View

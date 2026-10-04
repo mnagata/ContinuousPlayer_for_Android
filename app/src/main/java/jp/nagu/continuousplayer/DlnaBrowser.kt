@@ -36,6 +36,14 @@ class DlnaBrowser(
         directoryContent = null
     }
 
+    internal fun takeDialog(): DlnaSelectionDialog? {
+        job?.cancel()
+        job = null
+        returnToSavedFolders = null
+        directoryContent = null
+        return dialog.also { dialog = null }
+    }
+
     fun onConfigurationChanged() {
         val current = dialog ?: return
         if (current.isShowing) current.refreshForConfiguration()
@@ -61,6 +69,12 @@ class DlnaBrowser(
         }
     }
 
+    internal fun openSaved(folder: SavedDlnaFolder, inheritedDialog: DlnaSelectionDialog?, onReturn: () -> Unit) {
+        close()
+        dialog = inheritedDialog
+        openSaved(folder, onReturn)
+    }
+
     private suspend fun discoverServers(): List<DlnaServer> = withContext(Dispatchers.IO) {
         val wifi = if (activity.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI))
             activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager else null
@@ -75,8 +89,8 @@ class DlnaBrowser(
 
     private fun returnToSaved() {
         val onReturn = returnToSavedFolders ?: return
-        close()
         onReturn()
+        close()
     }
 
     private fun showServers(focusId: String? = null) {
@@ -137,8 +151,8 @@ class DlnaBrowser(
                     else -> {
                         selectedFolder = PlaybackFolder.Dlna(SavedDlnaFolder(server.id, server.name,
                             path.map { SavedDlnaPath(it.id, it.title) }))
-                        close()
                         onSelected(videos, index - folders.size)
+                        dialog?.closeAfterPlaybackFrame { close() }
                     }
                 }
             })
@@ -175,7 +189,7 @@ class DlnaBrowser(
     private fun load(message: Int, retry: () -> Unit, action: suspend () -> Unit) {
         // Cancel only the old request. Keep the browser window attached while changing content.
         job?.cancel()
-        if (dialog?.keepFileListWhileLoading() != true) showDialog(DlnaDialogContent(
+        if (dialog?.keepListWhileLoading(onClose = { close() }, showLoadingIndicator = true) != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.dlna_dialog_label),
             message = activity.getString(message),
             loading = true,
