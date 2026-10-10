@@ -22,6 +22,7 @@ class SafFileBrowser(
 ) {
     private val reader = SafDirectoryReader(activity)
     private val savedFolders = SavedDlnaFolders(activity)
+    private val lastPlaybackFolder = LastPlaybackFolder(activity)
     private var dialog: DlnaSelectionDialog? = null
     private var folderMenu: DlnaSelectionDialog? = null
     private var job: Job? = null
@@ -136,7 +137,7 @@ class SafFileBrowser(
                         detail = "${activity.getString(R.string.dlna_dialog_label)} · ${it.path.joinToString(" / ") { entry -> entry.title }}")
                 },
                 message = activity.getString(R.string.saf_no_folder),
-                initialSelection = roots.indexOfFirst { it.first == focusUri }.coerceAtLeast(0),
+                initialSelection = lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri),
                 refreshLabel = R.string.saf_add_folder,
                 onRefresh = { addFolder() },
                 onClose = { close() },
@@ -210,7 +211,7 @@ class SafFileBrowser(
             fileSelection = true,
             rows = rows,
             message = activity.getString(R.string.usb_empty),
-            initialSelection = folders.indexOfFirst { it.uri == focusUri }.coerceAtLeast(0),
+            initialSelection = lastPlaybackFolder.initialDirectorySelection(folders, focusUri),
             upLabel = if (path.size == 1) R.string.saf_folder_list else R.string.usb_parent,
             onUp = { parent(path) },
             onClose = { close() },

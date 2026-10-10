@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
           }
 
     private lateinit var viewModel: PlayerViewModel
+    private lateinit var lastPlaybackFolder: LastPlaybackFolder
 
     private var playerController: PlayerController? = null
     private var bitPerfectAudio: BitPerfectAudioManager? = null
@@ -99,6 +100,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         viewModel = ViewModelProvider(this)[PlayerViewModel::class.java]
+        lastPlaybackFolder = LastPlaybackFolder(this)
         usbBrowser = UsbFileBrowser(this) { videos, index ->
             if (::safBrowser.isInitialized) safBrowser.close()
             viewModel.playbackFolder = usbBrowser.selectedFolder
@@ -351,6 +353,7 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun startPlayback(videos: List<VideoItem>, startIndex: Int = 0) {
+        lastPlaybackFolder.save(viewModel.playbackFolder)
         stopPlayback()
         showPlayer()
         val controller = PlayerController(
@@ -627,6 +630,7 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onStop() {
+        lastPlaybackFolder.save(viewModel.playbackFolder)
         super.onStop()
         isInBackground = true
         playerController?.player?.pause()
