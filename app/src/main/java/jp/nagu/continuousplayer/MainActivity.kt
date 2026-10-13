@@ -147,6 +147,11 @@ class MainActivity : AppCompatActivity() {
             finishAndRemoveTask()
               }
 
+        findViewById<ImageButton>(R.id.btn_overlay_home).setOnClickListener {
+            stopPlayback()
+            showFolderSelect()
+        }
+
         overlayPlayPauseButton.setOnClickListener {
             togglePlayPause()
               }

@@ -7,6 +7,7 @@
     <string name="playback_info_label">再生中</string>
     <string name="no_mp4_found">No mp4 files found in this folder</string>
     <string name="resume_playback">Resume playback</string>
+    <string name="return_to_home">TOP画面に戻る</string>
     <string name="tv_controls_hint">Remote: Left/Right seek · Up/Down previous/next · OK play/pause</string>
     <string name="home_eyebrow">ANIME OPENINGS / ENDINGS</string>
     <string name="home_select">OP / EDを選ぶ</string>

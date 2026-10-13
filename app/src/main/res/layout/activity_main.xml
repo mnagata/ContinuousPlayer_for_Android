@@ -127,6 +127,17 @@
             android:paddingHorizontal="8dp"
             android:visibility="gone">
 
+             <ImageButton
+                android:id="@+id/btn_overlay_home"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/player_button_background"
+                android:contentDescription="@string/return_to_home"
+                android:nextFocusLeft="@id/btn_overlay_exit"
+                android:nextFocusRight="@id/btn_overlay_play_pause"
+                android:src="@drawable/ic_home"
+                android:tooltipText="@string/return_to_home" />
+
              <TextView
                 android:id="@+id/overlay_filename"
                 android:layout_width="0dp"
@@ -143,7 +154,7 @@
                 android:layout_height="48dp"
                 android:background="@drawable/player_button_background"
                 android:contentDescription="@string/resume_playback"
-                android:nextFocusLeft="@id/btn_overlay_exit"
+                android:nextFocusLeft="@id/btn_overlay_home"
                 android:nextFocusRight="@id/btn_overlay_info"
                 android:src="@drawable/ic_play"
                 android:tooltipText="@string/resume_playback" />
@@ -178,7 +189,7 @@
                 android:background="@drawable/player_button_background"
                 android:contentDescription="@string/exit_app"
                 android:nextFocusLeft="@id/btn_overlay_select_folder"
-                android:nextFocusRight="@id/btn_overlay_play_pause"
+                android:nextFocusRight="@id/btn_overlay_home"
                 android:src="@drawable/ic_close"
                 android:tooltipText="@string/exit_app" />
          </LinearLayout>
