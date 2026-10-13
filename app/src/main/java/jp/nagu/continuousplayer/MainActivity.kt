@@ -64,12 +64,13 @@ class MainActivity : AppCompatActivity() {
     private var playbackErrorDialog: AlertDialog? = null
     private var userPaused = false
     private var isInBackground = false
+    private var pendingUsbFolder: PlaybackFolder.Usb? = null
 
     private val storageSettings = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         if (Environment.isExternalStorageManager()) {
-            usbBrowser.open()
+            openUsbBrowser()
         } else {
             Toast.makeText(this, R.string.usb_permission_denied, Toast.LENGTH_LONG).show()
         }
@@ -101,7 +102,7 @@ class MainActivity : AppCompatActivity() {
 
         viewModel = ViewModelProvider(this)[PlayerViewModel::class.java]
         lastPlaybackFolder = LastPlaybackFolder(this)
-        usbBrowser = UsbFileBrowser(this) { videos, index ->
+        usbBrowser = UsbFileBrowser(this, onFolderSelected = { safBrowser.openSavedFolders(usbBrowser.takeDialog()) }) { videos, index ->
             if (::safBrowser.isInitialized) safBrowser.close()
             viewModel.playbackFolder = usbBrowser.selectedFolder
             viewModel.videos = videos
@@ -113,13 +114,15 @@ class MainActivity : AppCompatActivity() {
             startPlayback(videos, index)
         }
         safBrowser = SafFileBrowser(this,
-            onAddFolder = { if (isTelevision) launchUsbPicker() else launchTreePicker() },
+            onAddFolder = { launchTreePicker() },
             onAddDlna = { dlnaBrowser.open() },
             onDlnaFolder = { folder ->
                 dlnaBrowser.openSaved(folder, safBrowser.takeDialog()) {
                     safBrowser.openSavedFolders(dlnaBrowser.takeDialog())
                 }
-            }) { videos, index ->
+            },
+            onAddUsb = { launchUsbPicker() },
+            onUsbFolder = { launchUsbPicker(it.folder) }) { videos, index ->
             viewModel.playbackFolder = safBrowser.selectedFolder
             viewModel.videos = videos
             startPlayback(videos, index)
@@ -171,8 +174,11 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (viewModel.isPlayerScreen) {
+                    val focusMedia = playerController?.player?.currentMediaItemIndex
+                        ?.let { viewModel.videos.getOrNull(it) }
                     stopPlayback()
                     showFolderSelect()
+                    if (isTelevision) launchPlaybackFolder(focusMedia)
                      } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
@@ -283,13 +289,15 @@ class MainActivity : AppCompatActivity() {
         updatePauseOverlay()
     }
 
-    private fun launchPlaybackFolder() {
+    private fun launchPlaybackFolder(focusMedia: VideoItem? = null) {
         when (val folder = viewModel.playbackFolder) {
-            is PlaybackFolder.Saf -> safBrowser.openFolder(folder)
-            is PlaybackFolder.Dlna -> dlnaBrowser.openSaved(folder.folder) {
+            is PlaybackFolder.Saf -> safBrowser.openFolder(folder, focusMedia?.uri?.let(Uri::parse))
+            is PlaybackFolder.Dlna -> dlnaBrowser.openSaved(folder.folder, focusMediaId = focusMedia?.dlnaObjectId) {
                 safBrowser.openSavedFolders(dlnaBrowser.takeDialog())
             }
-            is PlaybackFolder.Usb -> usbBrowser.openFolder(folder)
+            is PlaybackFolder.Usb -> usbBrowser.openSaved(folder, null, focusUri = focusMedia?.uri) {
+                safBrowser.openSavedFolders(usbBrowser.takeDialog())
+            }
             null -> launchPicker()
         }
     }
@@ -302,13 +310,28 @@ class MainActivity : AppCompatActivity() {
         try {
             treePicker.launch(null)
         } catch (_: ActivityNotFoundException) {
-            launchUsbPicker()
+            AlertDialog.Builder(this)
+                .setTitle(R.string.saved_folder_local)
+                .setMessage(R.string.saf_picker_unavailable)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.usb_choose_drive) { _, _ -> launchUsbPicker() }
+                .show()
         }
     }
 
-    private fun launchUsbPicker() {
+    private fun openUsbBrowser() {
+        val folder = pendingUsbFolder
+        pendingUsbFolder = null
+        if (folder == null) usbBrowser.open()
+        else usbBrowser.openSaved(folder, safBrowser.takeDialog()) {
+            safBrowser.openSavedFolders(usbBrowser.takeDialog())
+        }
+    }
+
+    private fun launchUsbPicker(folder: PlaybackFolder.Usb? = null) {
+        pendingUsbFolder = folder
         if (Environment.isExternalStorageManager()) {
-            usbBrowser.open()
+            openUsbBrowser()
             return
         }
         AlertDialog.Builder(this)
@@ -592,6 +615,7 @@ private fun updatePortraitVideoInfo() {
         super.onConfigurationChanged(newConfig)
         if (::dlnaBrowser.isInitialized) dlnaBrowser.onConfigurationChanged()
         if (::safBrowser.isInitialized) safBrowser.onConfigurationChanged()
+        if (::usbBrowser.isInitialized) usbBrowser.onConfigurationChanged()
         updatePortraitVideoInfo()
           }
 

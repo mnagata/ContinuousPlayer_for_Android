@@ -12,6 +12,78 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class SavedFolderBrowserTest {
+    @Test fun televisionAddFolderRoutesSafUsbAndDlnaSeparately() = withFixture { scenario, folder ->
+        lateinit var browser: SafFileBrowser
+        lateinit var originalConfiguration: android.content.res.Configuration
+        val requests = mutableListOf<String>()
+        try {
+            scenario.onActivity { activity ->
+                originalConfiguration = android.content.res.Configuration(activity.resources.configuration)
+                setUiMode(activity, android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
+                browser = SafFileBrowser(activity, onAddFolder = { requests += "saf" },
+                    onAddDlna = { requests += "dlna" }, onDlnaFolder = { fail("Unexpected saved selection") },
+                    onAddUsb = { requests += "usb" }, onSelected = { _, _ -> fail("Unexpected playback") })
+                browser.openSavedFolders()
+            }
+            waitForFolder(folder.title)
+            BrowserTestUi.tap(R.string.saf_add_folder)
+            BrowserTestUi.waitForText(R.string.saved_folder_local)
+            BrowserTestUi.waitForText(R.string.usb_choose_drive)
+            BrowserTestUi.waitForText(R.string.dlna_select)
+            BrowserTestUi.tap(R.string.saved_folder_local)
+            BrowserTestUi.waitUntil { requests.size == 1 }
+            assertEquals(listOf("saf"), requests)
+            // Cancelling SAF or USB must leave the source chooser available.
+            BrowserTestUi.tap(R.string.usb_choose_drive)
+            BrowserTestUi.waitUntil { requests.size == 2 }
+            assertEquals(listOf("saf", "usb"), requests)
+            BrowserTestUi.tap(R.string.dlna_select)
+            BrowserTestUi.waitUntil { requests.size == 3 }
+            assertEquals(listOf("saf", "usb", "dlna"), requests)
+        } finally {
+            scenario.onActivity {
+                browser.close()
+                @Suppress("DEPRECATION")
+                it.resources.updateConfiguration(originalConfiguration, it.resources.displayMetrics)
+            }
+        }
+    }
+
+    @Test fun televisionSafSelectionLaunchesDocumentTreeAndCancelKeepsSourceChooser() = withFixture { scenario, folder ->
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val monitor = instrumentation.addMonitor(
+            android.content.IntentFilter(android.content.Intent.ACTION_OPEN_DOCUMENT_TREE),
+            android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED, null), true)
+        lateinit var originalConfiguration: android.content.res.Configuration
+        try {
+            scenario.onActivity { activity ->
+                originalConfiguration = android.content.res.Configuration(activity.resources.configuration)
+                setUiMode(activity, android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
+                activity.findViewById<android.widget.Button>(R.id.btn_select_folder).performClick()
+            }
+            waitForFolder(folder.title)
+            BrowserTestUi.tap(R.string.saf_add_folder)
+            BrowserTestUi.tap(R.string.saved_folder_local)
+            BrowserTestUi.waitUntil { monitor.hits == 1 }
+            BrowserTestUi.waitForText(R.string.saved_folder_local)
+            BrowserTestUi.waitForText(R.string.usb_choose_drive)
+            BrowserTestUi.tap(R.string.dlna_close)
+        } finally {
+            instrumentation.removeMonitor(monitor)
+            scenario.onActivity {
+                @Suppress("DEPRECATION")
+                it.resources.updateConfiguration(originalConfiguration, it.resources.displayMetrics)
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun setUiMode(activity: MainActivity, type: Int) {
+        val configuration = android.content.res.Configuration(activity.resources.configuration)
+        configuration.uiMode = (configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK.inv()) or type
+        activity.resources.updateConfiguration(configuration, activity.resources.displayMetrics)
+    }
+
     private class DelayedDlnaClient(private val folder: SavedDlnaFolder) : DlnaClient() {
         val ready = CompletableDeferred<Unit>()
         @Volatile var searching = false
@@ -78,7 +150,7 @@ class SavedFolderBrowserTest {
             assertEquals(0, detachCount)
             client.ready.complete(Unit)
         }
-        waitForFolder("Sample OP.mp4")
+        waitForFolder("Sample OP")
         scenario.onActivity {
             assertTrue(windowView.isAttachedToWindow)
             assertSame(titleView, windowView.findViewById(R.id.dlna_title))

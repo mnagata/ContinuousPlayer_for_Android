@@ -68,8 +68,10 @@ class LastPlaybackFolderTest {
             assertEquals(listOf(tree), context.contentResolver.persistedUriPermissions.filter { it.isReadPermission }.map { it.uri })
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 lateinit var browser: SafFileBrowser
+                var selectedMedia: VideoItem? = null
                 scenario.onActivity { activity ->
-                    browser = SafFileBrowser(activity, {}, {}, {}) { _, _ ->
+                    browser = SafFileBrowser(activity, {}, {}, {}) { media, index ->
+                        selectedMedia = media[index]
                         ViewModelProvider(activity)[PlayerViewModel::class.java].playbackFolder = browser.selectedFolder
                     }
                     browser.open()
@@ -78,9 +80,43 @@ class LastPlaybackFolderTest {
                 selectRow(scenario, "Scroll fixture", 24)
                 BrowserTestUi.waitForText("Collection 00")
                 selectRow(scenario, "Season 24", 27)
-                BrowserTestUi.waitForText("Sample.mp4")
-                BrowserTestUi.tap("Sample.mp4")
+                BrowserTestUi.waitForText("Sample")
+                BrowserTestUi.tap("Sample")
                 BrowserTestUi.waitUntil { browser.selectedFolder?.path?.size == 3 }
+                lateinit var configuration: android.content.res.Configuration
+                scenario.onActivity { activity ->
+                    configuration = android.content.res.Configuration(activity.resources.configuration)
+                    val tv = android.content.res.Configuration(configuration).apply {
+                        uiMode = (uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK.inv()) or
+                            android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+                    }
+                    @Suppress("DEPRECATION")
+                    activity.resources.updateConfiguration(tv, activity.resources.displayMetrics)
+                    val folder = requireNotNull(browser.selectedFolder)
+                    browser.close()
+                    browser.openFolder(folder, Uri.parse(requireNotNull(selectedMedia).uri))
+                }
+                try {
+                    BrowserTestUi.waitForText("Sample")
+                    BrowserTestUi.waitUntil {
+                        WindowInspector.getGlobalWindowViews().any {
+                            val list = it.findViewById<ListView>(R.id.dlna_list)
+                            list?.hasFocus() == true && list.selectedItemPosition == 2
+                        }
+                    }
+                    scenario.onActivity {
+                        val list = WindowInspector.getGlobalWindowViews().single { view ->
+                            view.findViewById<TextView>(R.id.dlna_title)?.text == "Collection 27"
+                        }.findViewById<ListView>(R.id.dlna_list)
+                        assertEquals("Sample", (list.selectedItem as DlnaRow).title)
+                        assertTrue(2 in list.firstVisiblePosition..list.lastVisiblePosition)
+                    }
+                } finally {
+                    scenario.onActivity { activity ->
+                        @Suppress("DEPRECATION")
+                        activity.resources.updateConfiguration(configuration, activity.resources.displayMetrics)
+                    }
+                }
                 scenario.onActivity { browser.close(); it.finishAndRemoveTask() }
             }
             assertTrue(preferences.getStringSet("saf_path", emptySet()).orEmpty().any { it.contains("season-24") })
@@ -124,6 +160,17 @@ class LastPlaybackFolderTest {
         assertEquals(3, restored.initialSelection(roots, listOf(otherServer, root, parent)))
         assertEquals(2, restored.initialSelection(roots, listOf(parent, child, otherServer)))
         assertEquals(0, restored.initialSelection(roots, listOf(otherServer)))
+    }
+
+    @Test fun usbPlaybackSelectsTheClosestRegisteredFolderOnTheSameDrive() {
+        val root = File("/storage/usb-one")
+        val parent = SavedUsbFolder(root.path, "$root/videos")
+        val child = SavedUsbFolder(root.path, "$root/videos/season")
+        val other = SavedUsbFolder("/storage/usb-two", "/storage/usb-two/videos/season")
+        LastPlaybackFolder(context).save(PlaybackFolder.Usb(root, File(root, "videos/season/OP")))
+        assertEquals(3, LastPlaybackFolder(context).initialSelection(listOf(tree("local")), emptyList(),
+            usb = listOf(other, parent, child)))
+        assertEquals(0, LastPlaybackFolder(context).initialSelection(emptyList(), emptyList(), usb = listOf(other)))
     }
 
     @Test fun exitingAndRelaunchingScrollsTheSavedListToThePlaybackFolder() {

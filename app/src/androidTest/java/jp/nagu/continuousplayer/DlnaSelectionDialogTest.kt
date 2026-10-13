@@ -23,6 +23,113 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class DlnaSelectionDialogTest {
     @Test
+    fun horizontalKeysPageFilesAndKeepSelectionVisibleAcrossOrientations() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            var selected = -1
+            scenario.onActivity { activity ->
+                dialog = DlnaSelectionDialog(activity, fixtureContent().copy(
+                    rows = (0 until 80).map { index ->
+                        DlnaRow(if (index % 3 == 0) "長い作品名のノンクレジットオープニングコレクション 第2期 OP $index.mp4"
+                            else "Sample $index.mp4", R.drawable.ic_play)
+                    }, onSelected = { selected = it }))
+                dialog.show()
+            }
+            for ((orientation, config) in listOf(
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT to Configuration.ORIENTATION_PORTRAIT,
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE to Configuration.ORIENTATION_LANDSCAPE
+            )) {
+                scenario.onActivity { it.requestedOrientation = orientation }
+                awaitOrientation(scenario, config)
+                scenario.onActivity { dialog.refreshForConfiguration() }
+                idle()
+                scenario.onActivity {
+                    dialog.findViewById<ListView>(R.id.dlna_list).apply {
+                        requestFocusFromTouch()
+                        setSelectionFromTop(0, 0)
+                    }
+                }
+                idle()
+                sendKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+                scenario.onActivity {
+                    val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                    assertTrue("Right must advance by a page", list.selectedItemPosition > 1)
+                    assertTrue("The viewport must move down", list.firstVisiblePosition > 0)
+                    assertTrue(list.selectedItemPosition in list.firstVisiblePosition..list.lastVisiblePosition)
+                    assertSame(list, dialog.currentFocus)
+                    assertEquals("Paging must not start playback", -1, selected)
+                }
+                sendKey(KeyEvent.KEYCODE_DPAD_LEFT)
+                scenario.onActivity {
+                    val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                    assertEquals(0, list.selectedItemPosition)
+                    assertEquals(0, list.firstVisiblePosition)
+                }
+                sendKey(KeyEvent.KEYCODE_DPAD_LEFT)
+                scenario.onActivity {
+                    val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                    assertEquals(0, list.selectedItemPosition)
+                    assertSame(list, dialog.currentFocus)
+                    list.setSelectionFromTop(79, 0)
+                }
+                idle()
+                sendKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+                scenario.onActivity {
+                    val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                    assertEquals(79, list.selectedItemPosition)
+                    assertSame(list, dialog.currentFocus)
+                }
+                sendKey(KeyEvent.KEYCODE_DPAD_LEFT)
+                scenario.onActivity {
+                    val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                    assertTrue("Left must return by a page", list.selectedItemPosition < 78)
+                    assertTrue(list.selectedItemPosition in list.firstVisiblePosition..list.lastVisiblePosition)
+                }
+            }
+            scenario.onActivity { dialog.findViewById<ListView>(R.id.dlna_list).setSelection(0) }
+            idle()
+            sendKey(KeyEvent.KEYCODE_DPAD_DOWN)
+            scenario.onActivity { assertEquals(1, dialog.findViewById<ListView>(R.id.dlna_list).selectedItemPosition) }
+            sendKey(KeyEvent.KEYCODE_DPAD_CENTER)
+            assertEquals(1, selected)
+            scenario.onActivity { dialog.dismiss() }
+        }
+    }
+
+    @Test
+    fun horizontalPagingIsDisabledWhileLoadingAndOutsideFileSelection() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            lateinit var content: DlnaDialogContent
+            scenario.onActivity { activity ->
+                content = fixtureContent().copy(rows = (0 until 60).map { DlnaRow("File $it.mp4", R.drawable.ic_play) },
+                    initialSelection = 20)
+                dialog = DlnaSelectionDialog(activity, content)
+                dialog.show()
+            }
+            idle()
+            scenario.onActivity {
+                dialog.findViewById<ListView>(R.id.dlna_list).requestFocusFromTouch()
+                assertTrue(dialog.keepListWhileLoading())
+            }
+            sendKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            sendKey(KeyEvent.KEYCODE_DPAD_LEFT)
+            scenario.onActivity {
+                assertEquals(20, dialog.findViewById<ListView>(R.id.dlna_list).selectedItemPosition)
+                dialog.updateContent(content.copy(fileSelection = false))
+            }
+            idle()
+            scenario.onActivity { dialog.findViewById<ListView>(R.id.dlna_list).requestFocusFromTouch() }
+            sendKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            sendKey(KeyEvent.KEYCODE_DPAD_LEFT)
+            scenario.onActivity {
+                assertEquals(20, dialog.findViewById<ListView>(R.id.dlna_list).selectedItemPosition)
+                dialog.dismiss()
+            }
+        }
+    }
+
+    @Test
     fun registrationActionRemainsReachableInPortraitAndLandscape() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             lateinit var dialog: DlnaSelectionDialog

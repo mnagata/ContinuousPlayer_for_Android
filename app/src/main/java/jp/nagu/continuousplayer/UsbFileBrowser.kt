@@ -1,6 +1,6 @@
 package jp.nagu.continuousplayer
 
-import android.app.AlertDialog
+import android.net.Uri
 import android.os.Environment
 import android.os.storage.StorageManager
 import androidx.appcompat.app.AppCompatActivity
@@ -11,31 +11,68 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
+import java.io.RandomAccessFile
+import java.util.Locale
 
-/** Read-only, D-pad navigable browser for mounted removable storage. */
+/** Read-only USB registration browser using the shared file-selection window. */
 class UsbFileBrowser(
     private val activity: AppCompatActivity,
+    private val onFolderSelected: () -> Unit = {},
     private val onSelected: (List<VideoItem>, Int) -> Unit
 ) {
-    private var dialog: AlertDialog? = null
+    private var dialog: DlnaSelectionDialog? = null
     private var job: Job? = null
     internal var selectedFolder: PlaybackFolder.Usb? = null
         private set
+    private val playbackBrowser = UsbPlaybackBrowser(activity) { folder, videos, index ->
+        selectedFolder = folder
+        onSelected(videos, index)
+    }
 
-    internal fun openFolder(folder: PlaybackFolder.Usb) = browse(folder.root, folder.directory)
+    internal fun openFolder(folder: PlaybackFolder.Usb, forRegistration: Boolean = false) {
+        if (forRegistration) {
+            close()
+            browse(folder.root, folder.directory)
+        } else openSaved(folder, null, onReturn = onFolderSelected)
+    }
+
+    internal fun openSaved(folder: PlaybackFolder.Usb, inheritedDialog: DlnaSelectionDialog?, focusUri: String? = null,
+        onReturn: () -> Unit) {
+        close()
+        playbackBrowser.open(folder, inheritedDialog, focusUri, onReturn)
+    }
+
+    internal fun takeDialog(): DlnaSelectionDialog? {
+        job?.cancel()
+        job = null
+        return dialog?.also { dialog = null } ?: playbackBrowser.takeDialog()
+    }
+
+    fun onConfigurationChanged() {
+        dialog?.takeIf { it.isShowing }?.refreshForConfiguration()
+        playbackBrowser.onConfigurationChanged()
+    }
+
     private val scanner = VideoScanner()
     private val preferences = activity.getSharedPreferences("usb_browser", android.content.Context.MODE_PRIVATE)
 
     fun close() {
+        playbackBrowser.close()
         job?.cancel()
+        job = null
         dialog?.dismiss()
         dialog = null
     }
 
-    fun open() = openStorage(restoreDirectory = true)
+    fun open() {
+        close()
+        openStorage(restoreDirectory = true)
+    }
 
     private fun openStorage(restoreDirectory: Boolean, focusRoot: File? = null) {
-        load {
+        load(activity.getString(R.string.usb_choose_drive),
+            retry = { openStorage(false, focusRoot) }) {
             val roots = withContext(Dispatchers.IO) {
                 activity.getSystemService(StorageManager::class.java).storageVolumes
                     .filter { it.isRemovable && it.state in
@@ -57,143 +94,118 @@ class UsbFileBrowser(
                 }.getOrNull()
             } else null
             if (previous != null) {
-                showDirectory(previous.first, previous.second)
+                browse(previous.first, previous.second)
                 return@load
             }
-            val builder = AlertDialog.Builder(activity)
-                .setTitle(R.string.usb_choose_drive)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setNeutralButton(R.string.usb_refresh) { _, _ -> openStorage(false) }
-            if (roots.isEmpty()) {
-                builder.setMessage(R.string.usb_no_drive)
-            } else {
-                builder.setItems(roots.map { "${it.first}\n${it.second.name}" }.toTypedArray()) { _, index ->
-                    val root = roots[index].second
-                    browse(root, root)
-                }
-            }
-            dialog = builder.show()
-            if (focusRoot != null && roots.isNotEmpty()) {
-                focusRow(roots.indexOfFirst { it.second == focusRoot }.coerceAtLeast(0))
-            }
+            show(DlnaDialogContent(
+                title = activity.getString(R.string.usb_choose_drive),
+                label = null,
+                fileSelection = true,
+                rows = roots.map { (name, root) ->
+                    DlnaRow(name, R.drawable.ic_folder_open, detail = root.name)
+                },
+                message = activity.getString(R.string.usb_no_drive),
+                initialSelection = roots.indexOfFirst { it.second == focusRoot }.coerceAtLeast(0),
+                onRefresh = { openStorage(false) },
+                onClose = { close() },
+                onSelected = { index -> roots[index].second.let { browse(it, it) } }
+            ))
         }
     }
 
     private fun browse(root: File, directory: File, focusChild: File? = null) {
-        load {
-            showDirectory(root, directory, focusChild)
+        load(directory.name.ifEmpty { directory.path },
+            retry = { browse(root, directory, focusChild) }, onUp = { parent(root, directory) }) {
+            val (directories, videos) = withContext(Dispatchers.IO) {
+                check(directory.canonicalFile.toPath().startsWith(root.canonicalFile.toPath()))
+                val files = directory.listFiles() ?: throw IOException("Unreadable or removed USB drive")
+                val directories = files.filter {
+                    it.isDirectory && it.canonicalFile.toPath().startsWith(root.canonicalFile.toPath())
+                }.sortedBy { it.name.lowercase(Locale.ROOT) }
+                val videos = scanner.scanDirectory(directory)
+                // Persist only locations whose contents were successfully read.
+                preferences.edit().putString("root", root.canonicalPath)
+                    .putString("directory", directory.canonicalPath).apply()
+                directories to videos
+            }
+            show(DlnaDialogContent(
+                title = directory.name.ifEmpty { directory.path },
+                label = null,
+                fileSelection = true,
+                rows = directories.map { DlnaRow(it.name, R.drawable.ic_folder_open,
+                    description = "${it.name}。${activity.getString(R.string.dlna_folder_detail)}") } + videos.map {
+                    val audio = it.displayName.substringAfterLast('.').lowercase(Locale.ROOT) in
+                        setOf("mp3", "flac", "m4a", "aac", "wav", "ogg", "opus")
+                    DlnaRow(it.selectionTitle, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
+                        description = "${it.selectionTitle}。${activity.getString(if (audio) R.string.dlna_audio_detail else R.string.dlna_video_detail)}")
+                },
+                message = activity.getString(R.string.usb_empty),
+                initialSelection = directories.indexOf(focusChild).coerceAtLeast(0),
+                onUp = { parent(root, directory) },
+                onRefresh = { browse(root, directory) },
+                registerLabel = R.string.usb_use_folder,
+                onRegister = {
+                    SavedUsbFolders(activity).save(root, directory)
+                    android.widget.Toast.makeText(activity, R.string.folder_registered,
+                        android.widget.Toast.LENGTH_SHORT).show()
+                    onFolderSelected()
+                    close()
+                },
+                onClose = { close() },
+                onSelected = { index ->
+                    if (index < directories.size) browse(root, directories[index])
+                    else play(root, directory, videos, index - directories.size)
+                }
+            ))
         }
     }
 
-    private suspend fun showDirectory(root: File, directory: File, focusChild: File? = null) {
-            val entries = withContext(Dispatchers.IO) {
-                check(directory.canonicalFile.toPath().startsWith(root.canonicalFile.toPath()))
-                val files = directory.listFiles()
-                    ?: throw java.io.IOException("Unreadable or removed USB drive")
-                val directories = files.filter {
-                    it.isDirectory && it.canonicalFile.toPath().startsWith(root.canonicalFile.toPath())
-                }.sortedBy { it.name.lowercase() }
-                directories to scanner.scanDirectory(directory)
-            }
-            // Save only directories successfully read. Closing or playing preserves this location.
+    private fun play(root: File, directory: File, videos: List<VideoItem>, index: Int) {
+        load(directory.name, retry = { play(root, directory, videos, index) },
+            onUp = { parent(root, directory) }) {
             withContext(Dispatchers.IO) {
-                preferences.edit()
-                    .putString("root", root.canonicalPath)
-                    .putString("directory", directory.canonicalPath)
-                    .apply()
-            }
-            val (directories, videos) = entries
-            val labels = listOf(activity.getString(R.string.usb_parent)) +
-                directories.map { "▸ ${it.name}" } + videos.map { it.displayName }
-            dialog = AlertDialog.Builder(activity)
-                .setTitle(directory.name.ifEmpty { directory.path })
-                .setItems(labels.toTypedArray()) { _, index ->
-                    when {
-                        index == 0 -> parent(root, directory)
-                        index <= directories.size -> browse(root, directories[index - 1])
-                        else -> {
-                            val videoIndex = index - directories.size - 1
-                            load(forPlayback = true) {
-                                withContext(Dispatchers.IO) {
-                                    // canRead() alone does not prove that the USB file can be opened.
-                                    java.io.RandomAccessFile(
-                                        File(android.net.Uri.parse(videos[videoIndex].uri).path!!), "r"
-                                    ).use { file ->
-                                        if (file.length() == 0L) throw java.io.IOException("Empty media file")
-                                        file.readByte()
-                                        file.seek(file.length() - 1)
-                                        file.readByte()
-                                    }
-                                }
-                                selectedFolder = PlaybackFolder.Usb(root, directory)
-                                onSelected(videos, videoIndex)
-                            }
-                        }
-                    }
+                // canRead() alone does not prove that the USB file can be opened.
+                RandomAccessFile(File(requireNotNull(Uri.parse(videos[index].uri).path)), "r").use { file ->
+                    if (file.length() == 0L) throw IOException("Empty media file")
+                    file.readByte()
+                    file.seek(file.length() - 1)
+                    file.readByte()
                 }
-                .setNegativeButton(android.R.string.cancel, null)
-                .setOnCancelListener { parent(root, directory) }
-                .show()
-            if (focusChild != null) {
-                // Row zero is "parent"; a removed child falls back to that row.
-                focusRow(directories.indexOfFirst { it == focusChild } + 1)
             }
-            if (directories.isEmpty() && videos.isEmpty()) {
-                android.widget.Toast.makeText(activity, R.string.usb_empty,
-                    android.widget.Toast.LENGTH_LONG).show()
-            }
+            selectedFolder = PlaybackFolder.Usb(root, directory)
+            onSelected(videos, index)
+            dialog?.closeAfterPlaybackFrame { close() }
+        }
     }
 
     private fun parent(root: File, directory: File) {
-        if (directory == root) openStorage(restoreDirectory = false, focusRoot = root)
+        if (directory.canonicalFile == root.canonicalFile) openStorage(false, focusRoot = root)
         else browse(root, directory.parentFile ?: root, focusChild = directory)
     }
 
-    private fun focusRow(position: Int) {
-        val target = dialog ?: return
-        val list = target.listView ?: return
-        // Wait until the new list is laid out and the loading dialog has been dismissed.
-        list.post {
-            if (dialog === target && target.isShowing && position in 0 until list.count) {
-                list.requestFocus()
-                list.setSelection(position)
-            }
-        }
+    private fun show(content: DlnaDialogContent) {
+        val current = dialog
+        if (current?.isShowing == true) current.updateContent(content)
+        else dialog = DlnaSelectionDialog(activity, content).also { it.show() }
     }
 
-    private fun load(forPlayback: Boolean = false, action: suspend () -> Unit) {
-        close()
+    private fun load(title: String, retry: () -> Unit, onUp: (() -> Unit)? = null, action: suspend () -> Unit) {
+        job?.cancel()
+        if (dialog?.keepListWhileLoading(onClose = { close() }) != true) {
+            show(DlnaDialogContent(title = title, label = null, fileSelection = true,
+                loading = true, message = activity.getString(R.string.usb_loading),
+                onUp = onUp, onClose = { close() }))
+        }
         job = activity.lifecycleScope.launch {
-            val loading = AlertDialog.Builder(activity)
-                .setMessage(R.string.usb_loading)
-                .setNegativeButton(android.R.string.cancel) { _, _ -> job?.cancel() }
-                .setOnCancelListener { job?.cancel() }
-                .show()
-            dialog = loading
-            var completed = false
             try {
                 action()
-                completed = true
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 android.util.Log.e("UsbFileBrowser", "USB selection failed", error)
-                dialog?.dismiss()
-                dialog = AlertDialog.Builder(activity)
-                    .setMessage(activity.getString(R.string.usb_read_error) +
-                        "\n\n${error.javaClass.simpleName}: ${error.message.orEmpty()}")
-                    .setPositiveButton(R.string.usb_refresh) { _, _ -> openStorage(false) }
-                    .setNegativeButton(android.R.string.cancel, null).show()
-            } finally {
-                if (forPlayback && completed) {
-                    activity.afterNextContentFrame {
-                        loading.dismiss()
-                        if (dialog === loading) dialog = null
-                    }
-                } else {
-                    loading.dismiss()
-                    if (dialog === loading) dialog = null
-                }
+                show(DlnaDialogContent(title = title, label = null, fileSelection = true,
+                    message = "${activity.getString(R.string.usb_read_error)}\n\n${error.javaClass.simpleName}: ${error.message.orEmpty()}",
+                    onUp = onUp, onRefresh = retry, onClose = { close() }))
             }
         }
     }

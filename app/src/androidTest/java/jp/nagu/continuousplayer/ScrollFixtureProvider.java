@@ -19,7 +19,7 @@ public class ScrollFixtureProvider extends DocumentsProvider {
 
     @Override public boolean isChildDocument(String parent, String child) {
         return parent.equals("root") || child.startsWith(parent + "/") ||
-            (child.equals("media") && parent.contains("/collection-"));
+            ((child.equals("media") || child.equals("media-two")) && parent.contains("/collection-"));
     }
 
     @Override public Cursor queryRoots(String[] projection) {
@@ -39,7 +39,10 @@ public class ScrollFixtureProvider extends DocumentsProvider {
         if (parent.equals("root")) {
             for (int i = 0; i < 40; i++) cursor.addRow(row(String.format(Locale.ROOT, "season-%02d", i)));
         } else if (parent.contains("/collection-")) {
+            if (parent.endsWith("/nested")) return cursor;
+            cursor.addRow(row(parent + "/nested"));
             cursor.addRow(row("media"));
+            cursor.addRow(row("media-two"));
         } else if (parent.startsWith("season-")) {
             for (int i = 0; i < 40; i++) cursor.addRow(row(parent + String.format(Locale.ROOT, "/collection-%02d", i)));
         }
@@ -52,7 +55,9 @@ public class ScrollFixtureProvider extends DocumentsProvider {
 
     private Object[] row(String id) {
         String title = id.equals("root") ? "Scroll fixture" : id.equals("media") ? "Sample.mp4" :
+            id.equals("media-two") ? "Other Sample.mp4" : id.endsWith("/nested") ? "Nested folder" :
             (id.contains("/collection-") ? "Collection " : "Season ") + id.substring(id.lastIndexOf('-') + 1);
-        return new Object[]{id, title, id.equals("media") ? "video/mp4" : DocumentsContract.Document.MIME_TYPE_DIR, 1L, 0L};
+        return new Object[]{id, title, (id.equals("media") || id.equals("media-two")) ?
+            "video/mp4" : DocumentsContract.Document.MIME_TYPE_DIR, 1L, 0L};
     }
 }

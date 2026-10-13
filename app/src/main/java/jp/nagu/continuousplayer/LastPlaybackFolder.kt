@@ -21,12 +21,15 @@ internal class LastPlaybackFolder(context: Context) {
             is PlaybackFolder.Dlna -> editor
                 .putString("dlna_server", folder.folder.serverId)
                 .putStringSet("dlna_path", folder.folder.path.map { it.id }.toSet())
-            is PlaybackFolder.Usb -> Unit // USB folders are not part of the saved list.
+            is PlaybackFolder.Usb -> editor
+                .putString("usb_root", folder.root.canonicalPath)
+                .putString("usb_directory", folder.directory.canonicalPath)
         }
         editor.apply()
     }
 
-    fun initialSelection(roots: List<Uri>, dlna: List<SavedDlnaFolder>, focusUri: Uri? = null): Int {
+    fun initialSelection(roots: List<Uri>, dlna: List<SavedDlnaFolder>, focusUri: Uri? = null,
+                         usb: List<SavedUsbFolder> = emptyList()): Int {
         // Returning from a directory explicitly selects that directory's root.
         roots.indexOf(focusUri).takeIf { it >= 0 }?.let { return it }
         val tree = preferences.getString("saf_tree", null)
@@ -37,7 +40,14 @@ internal class LastPlaybackFolder(context: Context) {
         // A child may not be registered itself: select its nearest saved ancestor.
         val index = dlna.indices.filter { dlna[it].serverId == server && dlna[it].folderId in path }
             .maxByOrNull { dlna[it].path.size }
-        return index?.let { roots.size + it } ?: 0
+        if (index != null) return roots.size + index
+        val usbRoot = preferences.getString("usb_root", null)
+        val usbDirectory = preferences.getString("usb_directory", null)
+        val usbIndex = usb.indices.filter {
+            usb[it].rootPath == usbRoot && usbDirectory != null &&
+                java.io.File(usbDirectory).toPath().startsWith(java.io.File(usb[it].directoryPath).toPath())
+        }.maxByOrNull { usb[it].directoryPath.length }
+        return usbIndex?.let { roots.size + dlna.size + it } ?: 0
     }
 
     fun initialDirectorySelection(folders: List<SafFolder>, focusUri: Uri? = null): Int {

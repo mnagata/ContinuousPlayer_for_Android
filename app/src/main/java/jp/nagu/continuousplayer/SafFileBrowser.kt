@@ -18,10 +18,13 @@ class SafFileBrowser(
     private val onAddFolder: () -> Unit,
     private val onAddDlna: () -> Unit,
     private val onDlnaFolder: (SavedDlnaFolder) -> Unit,
+    private val onAddUsb: (() -> Unit)? = null,
+    private val onUsbFolder: (SavedUsbFolder) -> Unit = {},
     private val onSelected: (List<VideoItem>, Int) -> Unit
 ) {
     private val reader = SafDirectoryReader(activity)
     private val savedFolders = SavedDlnaFolders(activity)
+    private val savedUsbFolders = SavedUsbFolders(activity)
     private val lastPlaybackFolder = LastPlaybackFolder(activity)
     private var dialog: DlnaSelectionDialog? = null
     private var folderMenu: DlnaSelectionDialog? = null
@@ -29,7 +32,7 @@ class SafFileBrowser(
     internal var selectedFolder: PlaybackFolder.Saf? = null
         private set
 
-    internal fun openFolder(folder: PlaybackFolder.Saf) = browse(folder.path)
+    internal fun openFolder(folder: PlaybackFolder.Saf, focusUri: Uri? = null) = browse(folder.path, focusUri)
 
     fun close() {
         folderMenu?.dismiss()
@@ -72,7 +75,7 @@ class SafFileBrowser(
             }
         } else {
             val trees = grantedTrees()
-            if (hasSavedDlnaFolders()) showRoots()
+            if (hasSavedDlnaFolders() || savedUsbFolders.all().isNotEmpty()) showRoots()
             else if (trees.isEmpty()) addFolder()
             else if (trees.size == 1) open(trees.single())
             else showRoots()
@@ -88,29 +91,32 @@ class SafFileBrowser(
         job = null
         val isTv = activity.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK ==
             android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
-        val hasRoots = grantedTrees().isNotEmpty() || hasSavedDlnaFolders()
+        val hasRoots = grantedTrees().isNotEmpty() || hasSavedDlnaFolders() || savedUsbFolders.all().isNotEmpty()
+        val sources = buildList<Pair<DlnaRow, () -> Unit>> {
+            add(DlnaRow(activity.getString(R.string.saved_folder_local), R.drawable.ic_folder_open,
+                detail = activity.getString(R.string.add_folder_local_detail)) to onAddFolder)
+            if (isTv && onAddUsb != null) {
+                add(DlnaRow(activity.getString(R.string.usb_choose_drive), R.drawable.ic_folder_open,
+                    detail = activity.getString(R.string.add_folder_usb_detail)) to onAddUsb)
+            }
+            add(DlnaRow(activity.getString(R.string.dlna_select), R.drawable.ic_dlna_server,
+                detail = activity.getString(R.string.add_folder_dlna_detail)) to {
+                // Attach the DLNA loading window before releasing this one.
+                onAddDlna()
+                close()
+            })
+        }
         showDialog(DlnaDialogContent(
             title = activity.getString(R.string.saf_add_folder),
             label = R.string.saved_folder_dialog_label,
             hint = R.string.add_folder_source_hint,
-            rows = listOf(
-                DlnaRow(activity.getString(if (isTv) R.string.usb_choose_drive else R.string.saved_folder_local),
-                    R.drawable.ic_folder_open,
-                    detail = activity.getString(if (isTv) R.string.add_folder_usb_detail else R.string.add_folder_local_detail)),
-                DlnaRow(activity.getString(R.string.dlna_select), R.drawable.ic_dlna_server,
-                    detail = activity.getString(R.string.add_folder_dlna_detail))),
+            rows = sources.map { it.first },
             upLabel = R.string.saved_folder_list,
             onUp = if (hasRoots) ({ showRoots() }) else null,
             onClose = { close() },
             onSelected = { index ->
-                if (index == 1) {
-                    // Attach the DLNA loading window before releasing this one.
-                    onAddDlna()
-                    close()
-                } else {
-                    // Keep the window underneath the system picker, including when it is cancelled.
-                    onAddFolder()
-                }
+                // Keep this window underneath the SAF/USB picker so cancelling returns here.
+                sources[index].second()
             }))
     }
 
@@ -127,6 +133,7 @@ class SafFileBrowser(
                 DlnaFolderSorter.sort(folders) { it.second }
             }
             val dlna = savedFolders.all().sortedBy { it.serverName + it.title }
+            val usb = DlnaFolderSorter.sort(savedUsbFolders.all()) { it.title }
             showDialog(DlnaDialogContent(
                 title = activity.getString(R.string.saf_choose_folder),
                 label = null,
@@ -135,25 +142,32 @@ class SafFileBrowser(
                     detail = activity.getString(R.string.saved_folder_local)) } + dlna.map {
                     DlnaRow(it.title, R.drawable.ic_dlna_server,
                         detail = "${activity.getString(R.string.dlna_dialog_label)} · ${it.path.joinToString(" / ") { entry -> entry.title }}")
+                } + usb.map {
+                    DlnaRow(it.title, R.drawable.ic_folder_open,
+                        detail = "${activity.getString(R.string.saved_folder_usb)} · ${it.directoryPath}")
                 },
                 message = activity.getString(R.string.saf_no_folder),
-                initialSelection = lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri),
+                initialSelection = lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri, usb),
                 refreshLabel = R.string.saf_add_folder,
                 onRefresh = { addFolder() },
                 onClose = { close() },
                 onSelected = { index ->
                     if (index < roots.size) open(roots[index].first)
-                    else {
+                    else if (index < roots.size + dlna.size) {
                         onDlnaFolder(dlna[index - roots.size])
+                        close()
+                    } else {
+                        onUsbFolder(usb[index - roots.size - dlna.size])
                         close()
                     }
                 },
                 onLongSelected = { index ->
                     val root = roots.getOrNull(index)
                     val folder = dlna.getOrNull(index - roots.size)
+                    val usbFolder = usb.getOrNull(index - roots.size - dlna.size)
                     folderMenu?.dismiss()
                     folderMenu = DlnaSelectionDialog(activity, DlnaDialogContent(
-                        title = root?.second ?: folder?.title.orEmpty(),
+                        title = root?.second ?: folder?.title ?: usbFolder?.title.orEmpty(),
                         label = R.string.saved_folder_dialog_label,
                         message = activity.getString(R.string.folder_unregister_message),
                         registerLabel = R.string.folder_unregister,
@@ -163,6 +177,7 @@ class SafFileBrowser(
                             try {
                                 if (root != null) releaseFolderPermission(root.first)
                                 else if (folder != null) savedFolders.remove(folder.serverId, folder.folderId)
+                                else if (usbFolder != null) savedUsbFolders.remove(usbFolder)
                                 android.widget.Toast.makeText(activity, R.string.folder_unregistered,
                                     android.widget.Toast.LENGTH_SHORT).show()
                             } catch (error: SecurityException) {
@@ -196,14 +211,15 @@ class SafFileBrowser(
 
     private suspend fun showDirectory(path: List<SafFolder>, focusUri: Uri? = null) {
         val (folders, media) = withContext(Dispatchers.IO) { reader.read(path.last()) }
+        val mediaSelection = if (focusUri != null) media.indexOfFirst { it.uri == focusUri.toString() } else -1
         val rows = folders.map { DlnaRow(it.title, R.drawable.ic_folder_open,
             description = "${it.title}。${activity.getString(R.string.dlna_folder_detail)}") } + media.map {
             val audio = it.mimeType?.startsWith("audio/") == true ||
                 it.displayName.substringAfterLast('.').lowercase(java.util.Locale.ROOT) in
                 setOf("mp3", "flac", "m4a", "aac", "wav", "ogg", "opus")
             val action = activity.getString(if (audio) R.string.dlna_audio_detail else R.string.dlna_video_detail)
-            DlnaRow(it.displayName, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
-                description = "${it.displayName}。$action")
+            DlnaRow(it.selectionTitle, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
+                description = "${it.selectionTitle}。$action")
         }
         showDialog(DlnaDialogContent(
             title = path.last().title,
@@ -211,7 +227,8 @@ class SafFileBrowser(
             fileSelection = true,
             rows = rows,
             message = activity.getString(R.string.usb_empty),
-            initialSelection = lastPlaybackFolder.initialDirectorySelection(folders, focusUri),
+            initialSelection = if (mediaSelection >= 0) folders.size + mediaSelection
+                else lastPlaybackFolder.initialDirectorySelection(folders, focusUri),
             upLabel = if (path.size == 1) R.string.saf_folder_list else R.string.usb_parent,
             onUp = { parent(path) },
             onClose = { close() },

@@ -57,22 +57,22 @@ class DlnaBrowser(
         }
     }
 
-    fun openSaved(folder: SavedDlnaFolder, onReturn: () -> Unit) {
+    fun openSaved(folder: SavedDlnaFolder, focusMediaId: String? = null, onReturn: () -> Unit) {
         returnToSavedFolders = onReturn
-        load(R.string.dlna_searching, retry = { openSaved(folder, onReturn) }) {
+        load(R.string.dlna_searching, retry = { openSaved(folder, focusMediaId, onReturn) }) {
             servers = discoverServers()
             val server = servers.firstOrNull { it.id == folder.serverId }
                 ?: throw java.io.IOException(activity.getString(R.string.dlna_saved_server_missing, folder.serverName))
             showDirectory(server, folder.path.mapIndexed { index, entry ->
                 DlnaEntry(entry.id, if (index == 0) server.name else entry.title)
-            })
+            }, focusMediaId)
         }
     }
 
     internal fun openSaved(folder: SavedDlnaFolder, inheritedDialog: DlnaSelectionDialog?, onReturn: () -> Unit) {
         close()
         dialog = inheritedDialog
-        openSaved(folder, onReturn)
+        openSaved(folder, onReturn = onReturn)
     }
 
     private suspend fun discoverServers(): List<DlnaServer> = withContext(Dispatchers.IO) {
@@ -120,15 +120,18 @@ class DlnaBrowser(
     private suspend fun showDirectory(server: DlnaServer, path: List<DlnaEntry>, focusId: String? = null) {
         val entries = withContext(Dispatchers.IO) { client.browse(server, path.last().id) }
         val folders = DlnaFolderSorter.sort(entries.filter { it.media == null })
-        val videos = scanner.sortMedia(entries.mapNotNull { it.media })
+        val videos = scanner.sortMedia(entries.mapNotNull { entry ->
+            entry.media?.copy(dlnaObjectId = entry.id)
+        })
+        val mediaSelection = if (focusId != null) videos.indexOfFirst { it.dlnaObjectId == focusId } else -1
         val rows = folders.map { DlnaRow(it.title, R.drawable.ic_folder_open,
             description = "${it.title}。${activity.getString(R.string.dlna_folder_detail)}") } + videos.map { media ->
             val audio = media.mimeType?.startsWith("audio/") == true ||
                 media.displayName.substringAfterLast('.').lowercase() in
                 setOf("mp3", "flac", "m4a", "aac", "wav", "ogg", "opus")
             val action = activity.getString(if (audio) R.string.dlna_audio_detail else R.string.dlna_video_detail)
-            DlnaRow(media.displayName, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
-                description = "${media.displayName}。$action")
+            DlnaRow(media.selectionTitle, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
+                description = "${media.selectionTitle}。$action")
         }
         val content = DlnaDialogContent(
             title = path.last().title,
@@ -136,7 +139,8 @@ class DlnaBrowser(
             fileSelection = true,
             rows = rows,
             message = activity.getString(R.string.dlna_empty),
-            initialSelection = folders.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
+            initialSelection = if (mediaSelection >= 0) folders.size + mediaSelection
+                else folders.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
             upLabel = if (path.size > 1) R.string.usb_parent else if (returnToSavedFolders != null)
                 R.string.saved_folder_list else R.string.dlna_server_list,
             onUp = { parent(server, path) },

@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -85,6 +86,25 @@ internal class DlnaSelectionDialog(
         })
         renderContent()
         setOnShowListener { focusSelection() }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val pageKey = when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_PAGE_UP
+            KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_PAGE_DOWN
+            else -> null
+        }
+        if (content.fileSelection && list.hasFocus() && pageKey != null) {
+            if (!awaitingDirectory && list.isEnabled) {
+                // Use ListView's page navigation so selection stays within the visible page.
+                list.dispatchKeyEvent(KeyEvent(event.downTime, event.eventTime, event.action,
+                    pageKey, event.repeatCount, event.metaState, event.deviceId,
+                    event.scanCode, event.flags, event.source))
+            }
+            // At either end, keep focus in the list; toolbar keys retain their own navigation.
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     fun updateContent(next: DlnaDialogContent) {
@@ -265,7 +285,7 @@ internal class DlnaSelectionDialog(
             visibility = if (current.rows.isEmpty() || activity.resources.configuration.orientation ==
                 Configuration.ORIENTATION_LANDSCAPE) View.GONE else View.VISIBLE
             setText(if (current.fileSelection) {
-                if (isTv()) R.string.dlna_tv_hint else R.string.file_browser_hint
+                if (isTv()) R.string.file_browser_tv_hint else R.string.file_browser_hint
             } else current.hint ?: if (current.onUp == null) R.string.dlna_server_hint else if (isTv()) R.string.dlna_tv_hint else R.string.dlna_touch_hint)
             setBackgroundColor(if (current.fileSelection) Color.rgb(14, 22, 40) else Color.TRANSPARENT)
             val padding = if (current.fileSelection) (12 * density).toInt() else 0
@@ -289,7 +309,8 @@ internal class DlnaSelectionDialog(
             currentList.post {
                 if (isShowing && content === current && list === currentList) {
                     // Ignore focus requests left over from a previous directory/load state.
-                    if (isTv() || !currentList.isInTouchMode) currentList.requestFocus()
+                    if (isTv()) currentList.requestFocusFromTouch()
+                    else if (!currentList.isInTouchMode) currentList.requestFocus()
                     currentList.setSelectionFromTop(current.initialSelection.coerceIn(current.rows.indices), 0)
                 }
             }
