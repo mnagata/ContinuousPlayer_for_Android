@@ -241,7 +241,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_UP,
             KeyEvent.KEYCODE_MEDIA_REWIND -> {
                 if (pauseMenuHasFocus) super.dispatchKeyEvent(event)
                 else {
@@ -250,7 +250,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
                 if (pauseMenuHasFocus) super.dispatchKeyEvent(event)
                 else {
@@ -259,16 +259,24 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                playerController?.previousVideo()
-                true
+                if (pauseMenuHasFocus && event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    super.dispatchKeyEvent(event)
+                } else {
+                    playerController?.previousVideo()
+                    true
+                }
             }
 
-            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                playerController?.nextVideo()
-                true
+                if (pauseMenuHasFocus && event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    super.dispatchKeyEvent(event)
+                } else {
+                    playerController?.nextVideo()
+                    true
+                }
             }
 
             KeyEvent.KEYCODE_INFO -> {
