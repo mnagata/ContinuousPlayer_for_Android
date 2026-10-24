@@ -89,6 +89,13 @@ internal class DlnaSelectionDialog(
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                dismiss()
+                content.onClose()
+            }
+            return true
+        }
         val pageKey = when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_PAGE_UP
             KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_PAGE_DOWN

@@ -2,6 +2,9 @@ package jp.nagu.continuousplayer
 
 import android.content.Context
 import android.content.res.Configuration
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.View
 import android.view.inspector.WindowInspector
 import android.widget.ImageButton
@@ -213,6 +216,105 @@ class PlaybackSelectionTest {
                 it.resources.updateConfiguration(configuration, it.resources.displayMetrics)
             }
         }
+    }
+
+    @Test fun escapeCancelsWholeSelectionFromNestedFolder() = withPlayback { scenario, fixture ->
+        val original = openSelection(scenario, fixture, paused = false)
+        select(scenario, fixture.directory.name, "Other folder")
+        waitForTitle("Other folder")
+        keyStroke(KeyEvent.KEYCODE_ESCAPE)
+        BrowserTestUi.waitUntil { original.playWhenReady && !browserShowing() }
+        scenario.onActivity {
+            assertSame(original, fixture.playerView.player)
+            assertEquals(fixture.folder, ViewModelProvider(it)[PlayerViewModel::class.java].playbackFolder)
+            assertEquals(1, original.currentMediaItemIndex)
+            assertEquals(30_000.0, original.currentPosition.toDouble(), 1_500.0)
+        }
+    }
+
+    @Test fun backInsideSelectionMovesToParentWithoutResuming() = withPlayback { scenario, fixture ->
+        val original = openSelection(scenario, fixture, paused = false)
+        select(scenario, fixture.directory.name, "Other folder")
+        waitForTitle("Other folder")
+        keyStroke(KeyEvent.KEYCODE_BACK)
+        waitForTitle(fixture.directory.name)
+        scenario.onActivity {
+            assertSame(original, fixture.playerView.player)
+            assertFalse(original.playWhenReady)
+        }
+        cancel(scenario, fixture.directory.name)
+        BrowserTestUi.waitUntil { original.playWhenReady }
+    }
+
+    @Test fun oDoesNotOpenAnotherSelectionBehindTheBrowser() = withPlayback { scenario, fixture ->
+        val original = openSelection(scenario, fixture, paused = false)
+        select(scenario, fixture.directory.name, "Other folder")
+        waitForTitle("Other folder")
+        keyStroke(KeyEvent.KEYCODE_O)
+        scenario.onActivity {
+            assertNotNull(window("Other folder"))
+            assertSame(original, fixture.playerView.player)
+            assertFalse(original.playWhenReady)
+        }
+        cancel(scenario, "Other folder")
+        BrowserTestUi.waitUntil { original.playWhenReady }
+    }
+
+    @Test fun escapeClosesOnlyMediaInformation() = withPlayback { scenario, fixture ->
+        val original = fixture.playerView.player!!
+        scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_info).performClick() }
+        BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().any {
+            it.findViewById<View>(R.id.info_close) != null
+        } }
+        keyStroke(KeyEvent.KEYCODE_ESCAPE)
+        BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().none {
+            it.findViewById<View>(R.id.info_close) != null
+        } }
+        scenario.onActivity {
+            assertSame(original, fixture.playerView.player)
+            assertFalse(browserShowing())
+            assertTrue(original.playWhenReady)
+        }
+    }
+
+    @Test fun escapeRepeatDoesNotCancelTheListOpenedByThatPress() = withPlayback { scenario, fixture ->
+        val original = fixture.playerView.player!!
+        val down = SystemClock.uptimeMillis()
+        keyEvent(KeyEvent.KEYCODE_ESCAPE, KeyEvent.ACTION_DOWN, down)
+        waitForTitle(fixture.directory.name)
+        keyEvent(KeyEvent.KEYCODE_ESCAPE, KeyEvent.ACTION_DOWN, down, repeat = 1)
+        keyEvent(KeyEvent.KEYCODE_ESCAPE, KeyEvent.ACTION_UP, down)
+        scenario.onActivity {
+            assertNotNull(window(fixture.directory.name))
+            assertSame(original, fixture.playerView.player)
+            assertFalse(original.playWhenReady)
+        }
+        keyStroke(KeyEvent.KEYCODE_ESCAPE)
+        BrowserTestUi.waitUntil { original.playWhenReady && !browserShowing() }
+    }
+
+    @Test fun modifiedOIsNotTheFileListShortcut() = withPlayback { scenario, fixture ->
+        val original = fixture.playerView.player!!
+        keyStroke(KeyEvent.KEYCODE_O, KeyEvent.META_CTRL_ON)
+        scenario.onActivity {
+            assertFalse(browserShowing())
+            assertSame(original, fixture.playerView.player)
+            assertTrue(original.playWhenReady)
+        }
+    }
+
+    private fun keyStroke(code: Int, modifiers: Int = 0) {
+        val down = SystemClock.uptimeMillis()
+        keyEvent(code, KeyEvent.ACTION_DOWN, down, modifiers = modifiers)
+        keyEvent(code, KeyEvent.ACTION_UP, down, modifiers = modifiers)
+    }
+
+    private fun keyEvent(code: Int, action: Int, down: Long, repeat: Int = 0, modifiers: Int = 0) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, SystemClock.uptimeMillis(),
+            action, code, repeat, modifiers, -1, 0, 0,
+            if (code == KeyEvent.KEYCODE_BACK) InputDevice.SOURCE_DPAD else InputDevice.SOURCE_KEYBOARD), true))
+        instrumentation.waitForIdleSync()
     }
 
     private fun openSelection(scenario: ActivityScenario<MainActivity>, fixture: Fixture, paused: Boolean): Player {

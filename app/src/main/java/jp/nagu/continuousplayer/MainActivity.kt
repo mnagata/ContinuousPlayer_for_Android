@@ -196,16 +196,14 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (viewModel.isPlayerScreen) {
-                    val focusMedia = playerController?.player?.currentMediaItemIndex
-                        ?.let { viewModel.videos.getOrNull(it) }
-                    if (isTelevision) openPlaybackSelection(focusMedia)
-                    else {
-                        stopPlayback()
-                        showFolderSelect()
-                    }
+                    openCurrentPlaybackSelection()
                      } else {
                     isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
+                    try {
+                        onBackPressedDispatcher.onBackPressed()
+                    } finally {
+                        isEnabled = true
+                    }
                      }
                  }
              })
@@ -218,6 +216,16 @@ class MainActivity : AppCompatActivity() {
           }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null &&
+            event.keyCode in listOf(KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_O) &&
+            event.hasNoModifiers() && currentFocus?.onCheckIsTextEditor() != true
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                openCurrentPlaybackSelection()
+            }
+            // Consume key-up and repeats as part of the same shortcut gesture.
+            return true
+        }
         if (!::viewModel.isInitialized || !viewModel.isPlayerScreen || playbackSelection != null ||
             event.action != KeyEvent.ACTION_DOWN ||
             event.repeatCount != 0
@@ -319,6 +327,12 @@ class MainActivity : AppCompatActivity() {
     private fun togglePlayPause() {
         playerController?.togglePlayPause()
         updatePauseOverlay()
+    }
+
+    private fun openCurrentPlaybackSelection() {
+        val focusMedia = playerController?.player?.currentMediaItemIndex
+            ?.let { viewModel.videos.getOrNull(it) }
+        openPlaybackSelection(focusMedia)
     }
 
     private fun openPlaybackSelection(focusMedia: VideoItem? = null) {

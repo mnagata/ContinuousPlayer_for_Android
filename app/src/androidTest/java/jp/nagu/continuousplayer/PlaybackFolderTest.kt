@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.View
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,16 +20,52 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PlaybackFolderTest {
-    @Test fun televisionBackDuringPlaybackReopensPlaylistDirectory() = checkPlaybackBack(television = true, paused = false)
+    @Test fun televisionBackDuringPlaybackReopensPlaylistDirectory() = checkPlaybackSelectionEntry(television = true, paused = false)
 
-    @Test fun televisionBackWhilePausedReopensPlaylistDirectory() = checkPlaybackBack(television = true, paused = true)
+    @Test fun televisionBackWhilePausedReopensPlaylistDirectory() = checkPlaybackSelectionEntry(television = true, paused = true)
 
     @Test fun televisionBackAfterTrackChangesFocusesTheCurrentFile() =
-        checkPlaybackBack(television = true, paused = false, advanceToNext = true)
+        checkPlaybackSelectionEntry(television = true, paused = false, advanceToNext = true)
 
-    @Test fun phoneBackDuringPlaybackReturnsToHome() = checkPlaybackBack(television = false, paused = false)
+    @Test fun phoneBackDuringPlaybackReopensPlaylistDirectory() = checkPlaybackSelectionEntry(television = false, paused = false)
 
-    private fun checkPlaybackBack(television: Boolean, paused: Boolean, advanceToNext: Boolean = false) {
+    @Test fun phoneBackWhilePausedReopensPlaylistDirectory() = checkPlaybackSelectionEntry(television = false, paused = true)
+
+    @Test fun phoneBackAfterTrackChangesFocusesTheCurrentFile() =
+        checkPlaybackSelectionEntry(television = false, paused = false, advanceToNext = true)
+
+    @Test fun escapeDuringPlaybackReopensPlaylistDirectory() =
+        checkPlaybackSelectionEntry(television = false, paused = false, keyCode = KeyEvent.KEYCODE_ESCAPE)
+
+    @Test fun escapeWhilePausedReopensPlaylistDirectory() =
+        checkPlaybackSelectionEntry(television = false, paused = true, keyCode = KeyEvent.KEYCODE_ESCAPE)
+
+    @Test fun oDuringPlaybackReopensPlaylistDirectory() =
+        checkPlaybackSelectionEntry(television = false, paused = false, keyCode = KeyEvent.KEYCODE_O)
+
+    @Test fun oWhilePausedReopensPlaylistDirectory() =
+        checkPlaybackSelectionEntry(television = false, paused = true, keyCode = KeyEvent.KEYCODE_O)
+
+    @Test fun homeBackUsesTheSystemNavigation() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var content: View
+            lateinit var activity: MainActivity
+            scenario.onActivity { activity = it; content = it.findViewById(android.R.id.content) }
+            BrowserTestUi.waitUntil { content.hasWindowFocus() }
+            sendKey(KeyEvent.KEYCODE_BACK)
+            BrowserTestUi.waitUntil {
+                activity.lifecycle.currentState in listOf(Lifecycle.State.CREATED, Lifecycle.State.DESTROYED)
+            }
+            // A root launcher activity may be backgrounded instead of destroyed by Android.
+            if (scenario.state != Lifecycle.State.DESTROYED) {
+                scenario.moveToState(Lifecycle.State.RESUMED)
+                scenario.onActivity { assertTrue(it.onBackPressedDispatcher.hasEnabledCallbacks()) }
+            }
+        }
+    }
+
+    private fun checkPlaybackSelectionEntry(television: Boolean, paused: Boolean, advanceToNext: Boolean = false,
+        keyCode: Int = KeyEvent.KEYCODE_BACK) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val root = File(context.cacheDir, "playback-back-fixture").apply { mkdirs() }
         val directory = File(root, "Current playlist folder").apply { mkdirs() }
@@ -102,6 +139,7 @@ class PlaybackFolderTest {
                         assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.player_container).visibility)
                         // Entering immersive playback can deliver the phone's actual mode again.
                         simulateDeviceMode(activity, television)
+                        playerView.player!!.seekTo(30_000)
                         if (paused) playerView.player!!.pause()
                     }
                     if (paused) BrowserTestUi.waitUntil {
@@ -116,72 +154,64 @@ class PlaybackFolderTest {
                             activity.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK)
                     }
                     val originalPlayer = playerView.player!!
-                    sendBack()
-                    // API 36 dispatches Back through the system; draining the main queue alone
-                    // does not guarantee that the back callback has been delivered yet.
-                    if (!television) {
-                        BrowserTestUi.waitUntil { playerView.player == null }
+                    var originalPosition = 0L
+                    scenario.onActivity { originalPosition = originalPlayer.currentPosition }
+                    sendKey(keyCode)
+                    // API 36 dispatches Back through the system; wait for the selection window.
+                    try {
+                        BrowserTestUi.waitForText(directory.name)
+                    } catch (error: AssertionError) {
+                        var details = ""
                         scenario.onActivity { activity ->
-                            assertFalse("Phone Back must leave the player screen; focus=${activity.currentFocus?.id}",
-                                ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen)
+                            val titles = android.view.inspector.WindowInspector.getGlobalWindowViews().map {
+                                "${it.findViewById<android.widget.TextView>(R.id.dlna_title)?.text}" +
+                                    "(shown=${it.isShown}, focus=${it.hasWindowFocus()})"
+                            }
+                            details = "player=${playerView.player != null}, playing=${playerView.player?.playWhenReady}, " +
+                                "screen=${ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen}, " +
+                                "mode=${activity.resources.configuration.uiMode}, windows=$titles"
+                        }
+                        throw AssertionError("Selection key $keyCode did not show the playback folder: $details", error)
+                    }
+                    val expectedTitle = if (advanceToNext) "Current ED" else "Current OP"
+                    val expectedRow = if (advanceToNext) 41 else 40
+                    BrowserTestUi.waitForText(expectedTitle)
+                    BrowserTestUi.waitUntil {
+                        android.view.inspector.WindowInspector.getGlobalWindowViews().any {
+                            val list = it.findViewById<android.widget.ListView>(R.id.dlna_list)
+                            list != null && expectedRow in list.firstVisiblePosition..list.lastVisiblePosition &&
+                                (!television || list.hasFocus() && list.selectedItemPosition == expectedRow)
                         }
                     }
-                    if (television) {
-                        try {
-                            BrowserTestUi.waitForText(directory.name)
-                        } catch (error: AssertionError) {
-                            var details = ""
-                            scenario.onActivity { activity ->
-                                val titles = android.view.inspector.WindowInspector.getGlobalWindowViews().map {
-                                    "${it.findViewById<android.widget.TextView>(R.id.dlna_title)?.text}" +
-                                        "(shown=${it.isShown}, focus=${it.hasWindowFocus()})"
-                                }
-                                details = "player=${playerView.player != null}, playing=${playerView.player?.playWhenReady}, " +
-                                    "screen=${ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen}, " +
-                                    "mode=${activity.resources.configuration.uiMode}, windows=$titles"
-                            }
-                            throw AssertionError("TV Back did not show the playback folder: $details", error)
+                    scenario.onActivity {
+                        assertSame(originalPlayer, playerView.player)
+                        assertFalse(originalPlayer.playWhenReady)
+                        val window = android.view.inspector.WindowInspector.getGlobalWindowViews().single {
+                            it.findViewById<android.widget.TextView>(R.id.dlna_title)?.text == directory.name
                         }
-                        val expectedTitle = if (advanceToNext) "Current ED" else "Current OP"
-                        val expectedRow = if (advanceToNext) 41 else 40
-                        BrowserTestUi.waitForText(expectedTitle)
-                        BrowserTestUi.waitUntil {
-                            android.view.inspector.WindowInspector.getGlobalWindowViews().any {
-                                val list = it.findViewById<android.widget.ListView>(R.id.dlna_list)
-                                list?.hasFocus() == true && list.selectedItemPosition == expectedRow
-                            }
-                        }
-                        scenario.onActivity {
-                            assertSame(originalPlayer, playerView.player)
-                            assertFalse(originalPlayer.playWhenReady)
-                            val window = android.view.inspector.WindowInspector.getGlobalWindowViews().single {
-                                it.findViewById<android.widget.TextView>(R.id.dlna_title)?.text == directory.name
-                            }
-                            val list = window.findViewById<android.widget.ListView>(R.id.dlna_list)
-                            assertTrue(list.isShown)
+                        val list = window.findViewById<android.widget.ListView>(R.id.dlna_list)
+                        assertTrue(list.isShown)
+                        if (television) {
                             assertTrue(list.hasFocus())
                             assertEquals(expectedRow, list.selectedItemPosition)
                             assertEquals(expectedTitle, (list.selectedItem as DlnaRow).title)
-                            assertTrue(expectedRow in list.firstVisiblePosition..list.lastVisiblePosition)
-                            assertEquals(View.GONE, window.findViewById<View>(R.id.dlna_register).visibility)
-                            // Cancel after checking the cursor; accessibility's active-window
-                            // snapshot can lag behind the newly focused TV dialog.
-                            window.findViewById<android.widget.Button>(R.id.dlna_close).performClick()
                         }
-                        BrowserTestUi.waitUntil {
-                            originalPlayer.playWhenReady == !paused &&
-                                (!paused || playerView.rootView.findViewById<View>(R.id.pause_overlay).isShown)
-                        }
+                        assertTrue(expectedRow in list.firstVisiblePosition..list.lastVisiblePosition)
+                        assertEquals(View.GONE, window.findViewById<View>(R.id.dlna_register).visibility)
+                        window.findViewById<android.widget.Button>(R.id.dlna_close).performClick()
+                    }
+                    BrowserTestUi.waitUntil {
+                        originalPlayer.playWhenReady == !paused &&
+                            (!paused || playerView.rootView.findViewById<View>(R.id.pause_overlay).isShown)
                     }
                     scenario.onActivity { activity ->
                         assertFalse(activity.isFinishing)
-                        assertEquals(television, ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen)
-                        if (television) {
-                            assertSame(originalPlayer, playerView.player)
-                            assertEquals(!paused, originalPlayer.playWhenReady)
-                        } else assertNull(playerView.player)
-                        assertEquals(if (television) View.GONE else View.VISIBLE,
-                            activity.findViewById<View>(R.id.folder_select_container).visibility)
+                        assertTrue(ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen)
+                        assertSame(originalPlayer, playerView.player)
+                        assertEquals(!paused, originalPlayer.playWhenReady)
+                        assertEquals(if (advanceToNext) 1 else 0, originalPlayer.currentMediaItemIndex)
+                        assertEquals(originalPosition.toDouble(), originalPlayer.currentPosition.toDouble(), 1_500.0)
+                        assertEquals(View.GONE, activity.findViewById<View>(R.id.folder_select_container).visibility)
                         assertTrue(android.view.inspector.WindowInspector.getGlobalWindowViews().none {
                             it.findViewById<View>(R.id.dlna_list) != null
                         })
@@ -214,13 +244,14 @@ class PlaybackFolderTest {
         activity.resources.updateConfiguration(configuration, activity.resources.displayMetrics)
     }
 
-    private fun sendBack() {
+    private fun sendKey(keyCode: Int) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
         val down = SystemClock.uptimeMillis()
         for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
             assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, SystemClock.uptimeMillis(),
-                action, KeyEvent.KEYCODE_BACK, 0, 0, -1, 0, 0, InputDevice.SOURCE_DPAD), true))
+                action, keyCode, 0, 0, -1, 0, 0,
+                if (keyCode == KeyEvent.KEYCODE_BACK) InputDevice.SOURCE_DPAD else InputDevice.SOURCE_KEYBOARD), true))
         }
         instrumentation.waitForIdleSync()
     }
