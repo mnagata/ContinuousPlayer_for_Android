@@ -31,7 +31,10 @@ internal object BrowserTestUi {
             instrumentation.waitForIdleSync()
             val nodes = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(title).orEmpty()
             val node = nodes.firstOrNull {
-                (it.text?.toString() == title || it.contentDescription?.toString() == title) && it.isVisibleToUser
+                val description = it.contentDescription?.toString()
+                // A browser row exposes its title followed by a spoken action, hiding child labels.
+                (it.text?.toString() == title || description == title ||
+                    description?.startsWith("$title。") == true) && it.isVisibleToUser
             }
             if (node != null) {
                 val bounds = Rect()

@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 /** Registered USB folders use the same file-selection window as SAF and DLNA. */
 internal class UsbPlaybackBrowser(
     private val activity: AppCompatActivity,
+    private val onCancelled: () -> Unit = {},
     private val onSelected: (PlaybackFolder.Usb, List<VideoItem>, Int) -> Unit
 ) {
     private var dialog: DlnaSelectionDialog? = null
@@ -31,6 +32,11 @@ internal class UsbPlaybackBrowser(
         dialog = null
         navigationRoot = null
         onReturn = null
+    }
+
+    private fun cancel() {
+        close()
+        onCancelled()
     }
 
     fun takeDialog(): DlnaSelectionDialog? {
@@ -93,7 +99,7 @@ internal class UsbPlaybackBrowser(
                     R.string.saved_folder_list else R.string.usb_parent,
                 onUp = { parent(root, directory) },
                 onRefresh = { browse(root, directory, focusUri = focusUri) },
-                onClose = { close() },
+                onClose = { cancel() },
                 onSelected = { index ->
                     if (index < folders.size) browse(root, folders[index])
                     else play(root, directory, media, index - folders.size)
@@ -124,10 +130,10 @@ internal class UsbPlaybackBrowser(
 
     private fun load(directory: File, retry: () -> Unit, onUp: () -> Unit, action: suspend () -> Unit) {
         job?.cancel()
-        if (dialog?.keepListWhileLoading(onClose = { close() }) != true) {
+        if (dialog?.keepListWhileLoading(onClose = { cancel() }) != true) {
             show(DlnaDialogContent(title = directory.name, label = null,
                 loading = true, message = activity.getString(R.string.usb_loading),
-                onUp = onUp, onClose = { close() }))
+                onUp = onUp, onClose = { cancel() }))
         }
         job = activity.lifecycleScope.launch {
             try {
@@ -140,7 +146,7 @@ internal class UsbPlaybackBrowser(
                     message = "${activity.getString(R.string.usb_read_error)}\n\n${error.message.orEmpty()}",
                     refreshLabel = R.string.playback_retry, onRefresh = retry,
                     upLabel = R.string.saved_folder_list,
-                    onUp = { onReturn?.invoke(); close() }, onClose = { close() }))
+                    onUp = { onReturn?.invoke(); close() }, onClose = { cancel() }))
             }
         }
     }

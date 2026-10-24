@@ -20,6 +20,7 @@ class SafFileBrowser(
     private val onDlnaFolder: (SavedDlnaFolder) -> Unit,
     private val onAddUsb: (() -> Unit)? = null,
     private val onUsbFolder: (SavedUsbFolder) -> Unit = {},
+    private val onCancelled: () -> Unit = {},
     private val onSelected: (List<VideoItem>, Int) -> Unit
 ) {
     private val reader = SafDirectoryReader(activity)
@@ -41,6 +42,11 @@ class SafFileBrowser(
         job = null
         dialog?.dismiss()
         dialog = null
+    }
+
+    private fun cancel() {
+        close()
+        onCancelled()
     }
 
     /** Transfer the attached window without revealing the activity underneath. */
@@ -113,7 +119,7 @@ class SafFileBrowser(
             rows = sources.map { it.first },
             upLabel = R.string.saved_folder_list,
             onUp = if (hasRoots) ({ showRoots() }) else null,
-            onClose = { close() },
+            onClose = { cancel() },
             onSelected = { index ->
                 // Keep this window underneath the SAF/USB picker so cancelling returns here.
                 sources[index].second()
@@ -150,7 +156,7 @@ class SafFileBrowser(
                 initialSelection = lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri, usb),
                 refreshLabel = R.string.saf_add_folder,
                 onRefresh = { addFolder() },
-                onClose = { close() },
+                onClose = { cancel() },
                 onSelected = { index ->
                     if (index < roots.size) open(roots[index].first)
                     else if (index < roots.size + dlna.size) {
@@ -231,7 +237,7 @@ class SafFileBrowser(
                 else lastPlaybackFolder.initialDirectorySelection(folders, focusUri),
             upLabel = if (path.size == 1) R.string.saf_folder_list else R.string.usb_parent,
             onUp = { parent(path) },
-            onClose = { close() },
+            onClose = { cancel() },
             onSelected = { index ->
                 if (index < folders.size) browse(path + folders[index])
                 else {
@@ -261,10 +267,10 @@ class SafFileBrowser(
 
     private fun load(retry: () -> Unit, onUp: (() -> Unit)? = null, action: suspend () -> Unit) {
         job?.cancel()
-        if (dialog?.keepListWhileLoading(onClose = { close() }) != true) showDialog(DlnaDialogContent(
+        if (dialog?.keepListWhileLoading(onClose = { cancel() }) != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.saf_dialog_label),
             message = activity.getString(R.string.saf_loading), loading = true,
-            onUp = onUp, onClose = { close() }))
+            onUp = onUp, onClose = { cancel() }))
         job = activity.lifecycleScope.launch {
             try {
                 action()
@@ -277,7 +283,7 @@ class SafFileBrowser(
                     message = activity.getString(R.string.saf_error_help) + "\n\n${error.message.orEmpty()}",
                     upLabel = R.string.saf_folder_list, onUp = { showRoots() },
                     refreshLabel = R.string.playback_retry, onRefresh = retry,
-                    onClose = { close() }))
+                    onClose = { cancel() }))
             }
         }
     }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 class DlnaBrowser(
     private val activity: AppCompatActivity,
     private val client: DlnaClient = DlnaClient(),
+    private val onCancelled: () -> Unit = {},
     private val onSelected: (List<VideoItem>, Int) -> Unit
 ) {
     private val savedFolders = SavedDlnaFolders(activity)
@@ -34,6 +35,11 @@ class DlnaBrowser(
         dialog = null
         returnToSavedFolders = null
         directoryContent = null
+    }
+
+    private fun cancel() {
+        close()
+        onCancelled()
     }
 
     internal fun takeDialog(): DlnaSelectionDialog? {
@@ -102,7 +108,7 @@ class DlnaBrowser(
             message = activity.getString(R.string.dlna_no_server),
             initialSelection = servers.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
             onRefresh = { open() },
-            onClose = { close() },
+            onClose = { cancel() },
             onSelected = { index ->
                 val server = servers[index]
                 browse(server, listOf(DlnaEntry("0", server.name)))
@@ -148,7 +154,7 @@ class DlnaBrowser(
             registerLabel = if (savedFolders.contains(server.id, path.last().id))
                 R.string.folder_unregister else R.string.folder_register,
             onRegister = if (returnToSavedFolders == null) ({ toggleSavedFolder(server, path) }) else null,
-            onClose = { close() },
+            onClose = { cancel() },
             onSelected = { index ->
                 when {
                     index < folders.size -> browse(server, path + folders[index])
@@ -193,11 +199,11 @@ class DlnaBrowser(
     private fun load(message: Int, retry: () -> Unit, action: suspend () -> Unit) {
         // Cancel only the old request. Keep the browser window attached while changing content.
         job?.cancel()
-        if (dialog?.keepListWhileLoading(onClose = { close() }, showLoadingIndicator = true) != true) showDialog(DlnaDialogContent(
+        if (dialog?.keepListWhileLoading(onClose = { cancel() }, showLoadingIndicator = true) != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.dlna_dialog_label),
             message = activity.getString(message),
             loading = true,
-            onClose = { close() }))
+            onClose = { cancel() }))
         job = activity.lifecycleScope.launch {
             try {
                 action()
@@ -212,7 +218,7 @@ class DlnaBrowser(
                     onUp = if (returnToSavedFolders != null) ({ returnToSaved() }) else null,
                     refreshLabel = R.string.playback_retry,
                     onRefresh = retry,
-                    onClose = { close() }))
+                    onClose = { cancel() }))
             }
         }
     }

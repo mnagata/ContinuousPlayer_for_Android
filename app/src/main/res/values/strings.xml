@@ -31,6 +31,7 @@
     <string name="playback_failed">再生できませんでした</string>
     <string name="playback_retry">再試行</string>
     <string name="playback_choose_another">別のファイルを選ぶ</string>
+    <string name="playback_source_unavailable">元のファイルにアクセスできません。ストレージの接続とアクセス許可を確認し、必要ならファイルを選び直してください。</string>
     <string name="dlna_select">NAS / DLNAから選ぶ</string>
     <string name="dlna_choose_source">再生元を選ぶ</string>
     <string name="dlna_choose_server">DLNAサーバーを選ぶ</string>

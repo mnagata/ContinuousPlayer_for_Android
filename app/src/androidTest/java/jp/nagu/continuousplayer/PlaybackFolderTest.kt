@@ -115,16 +115,33 @@ class PlaybackFolderTest {
                             if (television) Configuration.UI_MODE_TYPE_TELEVISION else Configuration.UI_MODE_TYPE_NORMAL,
                             activity.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK)
                     }
+                    val originalPlayer = playerView.player!!
                     sendBack()
                     // API 36 dispatches Back through the system; draining the main queue alone
                     // does not guarantee that the back callback has been delivered yet.
-                    BrowserTestUi.waitUntil { playerView.player == null }
-                    scenario.onActivity { activity ->
-                        assertFalse("Back must leave the player screen; focus=${activity.currentFocus?.id}",
-                            ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen)
+                    if (!television) {
+                        BrowserTestUi.waitUntil { playerView.player == null }
+                        scenario.onActivity { activity ->
+                            assertFalse("Phone Back must leave the player screen; focus=${activity.currentFocus?.id}",
+                                ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen)
+                        }
                     }
                     if (television) {
-                        BrowserTestUi.waitForText(directory.name)
+                        try {
+                            BrowserTestUi.waitForText(directory.name)
+                        } catch (error: AssertionError) {
+                            var details = ""
+                            scenario.onActivity { activity ->
+                                val titles = android.view.inspector.WindowInspector.getGlobalWindowViews().map {
+                                    "${it.findViewById<android.widget.TextView>(R.id.dlna_title)?.text}" +
+                                        "(shown=${it.isShown}, focus=${it.hasWindowFocus()})"
+                                }
+                                details = "player=${playerView.player != null}, playing=${playerView.player?.playWhenReady}, " +
+                                    "screen=${ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen}, " +
+                                    "mode=${activity.resources.configuration.uiMode}, windows=$titles"
+                            }
+                            throw AssertionError("TV Back did not show the playback folder: $details", error)
+                        }
                         val expectedTitle = if (advanceToNext) "Current ED" else "Current OP"
                         val expectedRow = if (advanceToNext) 41 else 40
                         BrowserTestUi.waitForText(expectedTitle)
@@ -135,6 +152,8 @@ class PlaybackFolderTest {
                             }
                         }
                         scenario.onActivity {
+                            assertSame(originalPlayer, playerView.player)
+                            assertFalse(originalPlayer.playWhenReady)
                             val window = android.view.inspector.WindowInspector.getGlobalWindowViews().single {
                                 it.findViewById<android.widget.TextView>(R.id.dlna_title)?.text == directory.name
                             }
@@ -149,12 +168,20 @@ class PlaybackFolderTest {
                             // snapshot can lag behind the newly focused TV dialog.
                             window.findViewById<android.widget.Button>(R.id.dlna_close).performClick()
                         }
+                        BrowserTestUi.waitUntil {
+                            originalPlayer.playWhenReady == !paused &&
+                                (!paused || playerView.rootView.findViewById<View>(R.id.pause_overlay).isShown)
+                        }
                     }
                     scenario.onActivity { activity ->
                         assertFalse(activity.isFinishing)
-                        assertFalse(ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen)
-                        assertNull(playerView.player)
-                        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.folder_select_container).visibility)
+                        assertEquals(television, ViewModelProvider(activity)[PlayerViewModel::class.java].isPlayerScreen)
+                        if (television) {
+                            assertSame(originalPlayer, playerView.player)
+                            assertEquals(!paused, originalPlayer.playWhenReady)
+                        } else assertNull(playerView.player)
+                        assertEquals(if (television) View.GONE else View.VISIBLE,
+                            activity.findViewById<View>(R.id.folder_select_container).visibility)
                         assertTrue(android.view.inspector.WindowInspector.getGlobalWindowViews().none {
                             it.findViewById<View>(R.id.dlna_list) != null
                         })

@@ -19,13 +19,14 @@ import java.util.Locale
 class UsbFileBrowser(
     private val activity: AppCompatActivity,
     private val onFolderSelected: () -> Unit = {},
+    private val onCancelled: () -> Unit = {},
     private val onSelected: (List<VideoItem>, Int) -> Unit
 ) {
     private var dialog: DlnaSelectionDialog? = null
     private var job: Job? = null
     internal var selectedFolder: PlaybackFolder.Usb? = null
         private set
-    private val playbackBrowser = UsbPlaybackBrowser(activity) { folder, videos, index ->
+    private val playbackBrowser = UsbPlaybackBrowser(activity, onCancelled) { folder, videos, index ->
         selectedFolder = folder
         onSelected(videos, index)
     }
@@ -63,6 +64,11 @@ class UsbFileBrowser(
         job = null
         dialog?.dismiss()
         dialog = null
+    }
+
+    private fun cancel() {
+        close()
+        onCancelled()
     }
 
     fun open() {
@@ -107,7 +113,7 @@ class UsbFileBrowser(
                 message = activity.getString(R.string.usb_no_drive),
                 initialSelection = roots.indexOfFirst { it.second == focusRoot }.coerceAtLeast(0),
                 onRefresh = { openStorage(false) },
-                onClose = { close() },
+                onClose = { cancel() },
                 onSelected = { index -> roots[index].second.let { browse(it, it) } }
             ))
         }
@@ -151,7 +157,7 @@ class UsbFileBrowser(
                     onFolderSelected()
                     close()
                 },
-                onClose = { close() },
+                onClose = { cancel() },
                 onSelected = { index ->
                     if (index < directories.size) browse(root, directories[index])
                     else play(root, directory, videos, index - directories.size)
@@ -191,10 +197,10 @@ class UsbFileBrowser(
 
     private fun load(title: String, retry: () -> Unit, onUp: (() -> Unit)? = null, action: suspend () -> Unit) {
         job?.cancel()
-        if (dialog?.keepListWhileLoading(onClose = { close() }) != true) {
+        if (dialog?.keepListWhileLoading(onClose = { cancel() }) != true) {
             show(DlnaDialogContent(title = title, label = null, fileSelection = true,
                 loading = true, message = activity.getString(R.string.usb_loading),
-                onUp = onUp, onClose = { close() }))
+                onUp = onUp, onClose = { cancel() }))
         }
         job = activity.lifecycleScope.launch {
             try {
@@ -205,7 +211,7 @@ class UsbFileBrowser(
                 android.util.Log.e("UsbFileBrowser", "USB selection failed", error)
                 show(DlnaDialogContent(title = title, label = null, fileSelection = true,
                     message = "${activity.getString(R.string.usb_read_error)}\n\n${error.javaClass.simpleName}: ${error.message.orEmpty()}",
-                    onUp = onUp, onRefresh = retry, onClose = { close() }))
+                    onUp = onUp, onRefresh = retry, onClose = { cancel() }))
             }
         }
     }
