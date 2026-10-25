@@ -38,6 +38,10 @@ public class ScrollFixtureProvider extends DocumentsProvider {
         MatrixCursor cursor = new MatrixCursor(COLUMNS);
         if (parent.equals("root")) {
             for (int i = 0; i < 40; i++) cursor.addRow(row(String.format(Locale.ROOT, "season-%02d", i)));
+        } else if (parent.equals("focus-fixture")) {
+            for (int i = 0; i < 40; i++) cursor.addRow(row(String.format(Locale.ROOT, "focus-fixture/folder-%02d", i)));
+            cursor.addRow(row("focus-fixture/media-one"));
+            cursor.addRow(row("focus-fixture/media-two"));
         } else if (parent.contains("/collection-")) {
             if (parent.endsWith("/nested")) return cursor;
             cursor.addRow(row(parent + "/nested"));
@@ -54,10 +58,11 @@ public class ScrollFixtureProvider extends DocumentsProvider {
     }
 
     private Object[] row(String id) {
-        String title = id.equals("root") ? "Scroll fixture" : id.equals("media") ? "Sample.mp4" :
+        boolean focusMedia = id.equals("focus-fixture/media-one") || id.equals("focus-fixture/media-two");
+        String title = focusMedia ? "Duplicate.mp4" : id.equals("root") ? "Scroll fixture" : id.equals("media") ? "Sample.mp4" :
             id.equals("media-two") ? "Other Sample.mp4" : id.endsWith("/nested") ? "Nested folder" :
             (id.contains("/collection-") ? "Collection " : "Season ") + id.substring(id.lastIndexOf('-') + 1);
-        return new Object[]{id, title, (id.equals("media") || id.equals("media-two")) ?
+        return new Object[]{id, title, (focusMedia || id.equals("media") || id.equals("media-two")) ?
             "video/mp4" : DocumentsContract.Document.MIME_TYPE_DIR, 1L, 0L};
     }
 }

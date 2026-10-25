@@ -136,6 +136,73 @@ class LastPlaybackFolderTest {
         }
     }
 
+    @Test fun safCurrentFileUsesUriWithDuplicateNamesAndScrollsBeyondFolders() {
+        val tree = ScrollFixtureProvider.tree
+        val alreadyGranted = context.contentResolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission }
+        context.startActivity(Intent().setClassName("jp.nagu.continuousplayer.test",
+            ScrollFixtureGrantActivity::class.java.name).putExtra("target", context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        BrowserTestUi.waitUntil {
+            runCatching { context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                .isSuccess
+        }
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                lateinit var browser: SafFileBrowser
+                lateinit var configuration: android.content.res.Configuration
+                var selected: VideoItem? = null
+                scenario.onActivity { activity ->
+                    configuration = android.content.res.Configuration(activity.resources.configuration)
+                    val tv = android.content.res.Configuration(configuration).apply {
+                        uiMode = (uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK.inv()) or
+                            android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+                    }
+                    @Suppress("DEPRECATION")
+                    activity.resources.updateConfiguration(tv, activity.resources.displayMetrics)
+                    browser = SafFileBrowser(activity, {}, {}, {}) { media, index -> selected = media[index] }
+                }
+                val title = "SAF current-file fixture"
+                val folder = PlaybackFolder.Saf(listOf(SafFolder(
+                    DocumentsContract.buildDocumentUriUsingTree(tree, "focus-fixture"), title)))
+                try {
+                    for ((id, expectedRow) in listOf("media-two" to 41, "media-one" to 40, "missing" to 0)) {
+                        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, "focus-fixture/$id")
+                        scenario.onActivity {
+                            browser.close()
+                            selected = null
+                            browser.openFolder(folder, uri)
+                        }
+                        BrowserTestUi.waitUntil {
+                            WindowInspector.getGlobalWindowViews().any {
+                                val list = it.findViewById<ListView>(R.id.dlna_list)
+                                it.findViewById<TextView>(R.id.dlna_title)?.text == title &&
+                                    list?.hasFocus() == true && list.count == 42 && list.selectedItemPosition == expectedRow
+                            }
+                        }
+                        scenario.onActivity {
+                            val list = list(title)
+                            assertTrue(expectedRow in list.firstVisiblePosition..list.lastVisiblePosition)
+                            assertNull("Opening a browser must not choose a media file", selected)
+                            if (expectedRow > 0) {
+                                assertEquals("Duplicate", (list.selectedItem as DlnaRow).title)
+                                list.performItemClick(list.selectedView, expectedRow, list.selectedItemId)
+                                assertEquals(uri.toString(), selected?.uri)
+                            } else assertEquals(R.drawable.ic_folder_open, (list.selectedItem as DlnaRow).icon)
+                        }
+                    }
+                } finally {
+                    scenario.onActivity { activity ->
+                        browser.close()
+                        @Suppress("DEPRECATION")
+                        activity.resources.updateConfiguration(configuration, activity.resources.displayMetrics)
+                    }
+                }
+            }
+        } finally {
+            if (!alreadyGranted) context.contentResolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
     @Test fun explicitParentSelectionTakesPriorityAndNoPlaybackKeepsThePreviousFolder() {
         val first = tree("first")
         val last = tree("last")

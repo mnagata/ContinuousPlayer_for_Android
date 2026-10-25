@@ -46,6 +46,22 @@ class PlaybackFolderTest {
     @Test fun oWhilePausedReopensPlaylistDirectory() =
         checkPlaybackSelectionEntry(television = false, paused = true, keyCode = KeyEvent.KEYCODE_O)
 
+    @Test fun phoneFolderButtonFocusesCurrentFile() =
+        checkPlaybackSelectionEntry(television = false, paused = true, useFolderButton = true)
+
+    @Test fun phoneFolderButtonAfterTrackChangesFocusesCurrentFile() =
+        checkPlaybackSelectionEntry(television = false, paused = true, advanceToNext = true, useFolderButton = true)
+
+    @Test fun televisionFolderButtonFocusesCurrentFile() =
+        checkPlaybackSelectionEntry(television = true, paused = true, useFolderButton = true)
+
+    @Test fun televisionFolderButtonAfterTrackChangesFocusesCurrentFile() =
+        checkPlaybackSelectionEntry(television = true, paused = true, advanceToNext = true, useFolderButton = true)
+
+    @Test fun keyboardFolderButtonAfterTrackChangesFocusesCurrentFile() =
+        checkPlaybackSelectionEntry(television = false, paused = true, advanceToNext = true,
+            useFolderButton = true, activateWithKeyboard = true)
+
     @Test fun homeBackUsesTheSystemNavigation() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             lateinit var content: View
@@ -65,7 +81,7 @@ class PlaybackFolderTest {
     }
 
     private fun checkPlaybackSelectionEntry(television: Boolean, paused: Boolean, advanceToNext: Boolean = false,
-        keyCode: Int = KeyEvent.KEYCODE_BACK) {
+        keyCode: Int = KeyEvent.KEYCODE_BACK, useFolderButton: Boolean = false, activateWithKeyboard: Boolean = false) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val root = File(context.cacheDir, "playback-back-fixture").apply { mkdirs() }
         val directory = File(root, "Current playlist folder").apply { mkdirs() }
@@ -156,7 +172,14 @@ class PlaybackFolderTest {
                     val originalPlayer = playerView.player!!
                     var originalPosition = 0L
                     scenario.onActivity { originalPosition = originalPlayer.currentPosition }
-                    sendKey(keyCode)
+                    if (useFolderButton) {
+                        if (activateWithKeyboard) {
+                            scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_select_folder).requestFocusFromTouch() }
+                            sendKey(KeyEvent.KEYCODE_ENTER)
+                        } else {
+                            scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_select_folder).performClick() }
+                        }
+                    } else sendKey(keyCode)
                     // API 36 dispatches Back through the system; wait for the selection window.
                     try {
                         BrowserTestUi.waitForText(directory.name)
@@ -180,7 +203,7 @@ class PlaybackFolderTest {
                         android.view.inspector.WindowInspector.getGlobalWindowViews().any {
                             val list = it.findViewById<android.widget.ListView>(R.id.dlna_list)
                             list != null && expectedRow in list.firstVisiblePosition..list.lastVisiblePosition &&
-                                (!television || list.hasFocus() && list.selectedItemPosition == expectedRow)
+                                (!(television || activateWithKeyboard) || list.hasFocus() && list.selectedItemPosition == expectedRow)
                         }
                     }
                     scenario.onActivity {
@@ -191,7 +214,7 @@ class PlaybackFolderTest {
                         }
                         val list = window.findViewById<android.widget.ListView>(R.id.dlna_list)
                         assertTrue(list.isShown)
-                        if (television) {
+                        if (television || activateWithKeyboard) {
                             assertTrue(list.hasFocus())
                             assertEquals(expectedRow, list.selectedItemPosition)
                             assertEquals(expectedTitle, (list.selectedItem as DlnaRow).title)

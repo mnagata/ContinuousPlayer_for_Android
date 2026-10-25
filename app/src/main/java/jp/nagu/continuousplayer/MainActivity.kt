@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity() {
               }
 
         findViewById<ImageButton>(R.id.btn_overlay_select_folder).setOnClickListener {
-            openPlaybackSelection()
+            openCurrentPlaybackSelection()
               }
 
         findViewById<ImageButton>(R.id.btn_overlay_exit).setOnClickListener {
@@ -335,7 +335,7 @@ class MainActivity : AppCompatActivity() {
         openPlaybackSelection(focusMedia)
     }
 
-    private fun openPlaybackSelection(focusMedia: VideoItem? = null) {
+    private fun openPlaybackSelection(focusMedia: VideoItem?) {
         if (playbackSelection != null) return
         val controller = playerController
         if (controller != null) {
