@@ -496,7 +496,13 @@ class MainActivity : AppCompatActivity() {
         val controller = PlayerController(
             this,
             onPlaybackFailure = if (isTelevision || videos.any { it.uri.startsWith("http") })
-                ({ error -> showPlaybackError(error) }) else null
+                ({ error -> showPlaybackError(error) }) else null,
+            onPlaybackInterrupted = {
+                playbackSelection?.interrupted = true
+                userPaused = true
+                updatePauseOverlay()
+            },
+            isPlaybackAllowed = { playbackSelection == null }
         )
         playerController = controller
         playerView.player = controller.player
@@ -690,8 +696,8 @@ private fun updatePortraitVideoInfo() {
 
                 if (player != null) {
                     try {
-                        val videoFormat = player.videoFormat
-                        val audioFormat = player.audioFormat
+                        val videoFormat = playerController?.videoFormat
+                        val audioFormat = playerController?.audioFormat
                         if (videoFormat != null) {
                             val codec = videoFormat.codecs ?: videoFormat.sampleMimeType ?: ""
                             val resolution = "${videoFormat.width}x${videoFormat.height}"
@@ -781,7 +787,7 @@ private fun updatePortraitVideoInfo() {
         playbackSelection?.interrupted = true
         // A stopped activity always returns paused, with controls for explicit resumption.
         if (playerController != null) userPaused = true
-        playerController?.player?.pause()
+        playerController?.pauseForBackground()
         updatePauseOverlay()
           }
 

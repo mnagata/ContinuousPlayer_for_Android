@@ -276,6 +276,18 @@ TV以外のローカル再生エラー時は次の項目があれば移動して
 - SAFのアクセス権限、登録済みDLNAのIDと階層、USBの登録済みフォルダーと最後に読めた閲覧位置を永続保存する。これらは再生位置・履歴の保存とは別。
 - バックグラウンド再生サービスはない。
 
+### 8.3 音声フォーカス・出力切断
+
+`PlaybackAudioMonitor`がUSAGE_MEDIA／CONTENT_TYPE_MUSICのAudioFocusRequestを管理する。音量低下要求にも一時停止で応じるためsetWillPauseWhenDucked(true)を指定し、遅延取得による自動再開は要求しない。Media3の自動音声フォーカス制御は無効にする。
+
+PlayerControllerはForwardingPlayerを画面・操作・MediaSessionに共通で渡し、play／setPlayWhenReady(true)の前にフォーカス取得を確認する。拒否された場合は一時停止を維持する。恒久・一時喪失・音量低下要求では同じプレイヤーを一時停止し、ファイル・位置・キューを保持して操作部を表示する。フォーカス取得通知だけではplayしない。一覧表示中のPlay要求は、フォーカスを要求する前に拒否する。
+
+一時停止や一覧への一時移動では生存中のセッションのフォーカス監視を保持し、一覧中の割り込みも記録する。キャンセル後や情報画面を閉じた後も自動再開しない。背景化では一時停止してフォーカスを返し、明示的な再開時に取り直す。セッション終了ではフォーカス、受信機、機器・経路コールバックを解放する。
+
+出力切断は、システムのAUDIO_BECOMING_NOISYとAudioDeviceCallbackを監視する。Media3標準のAudioTrack生成処理を委譲先として使い、AudioRoutingの通知で実際の出力IDを追跡する。使用中の出力IDが削除された場合は一時停止し、別の接続機器の取り外しでは停止しない。経路が先に内蔵スピーカーへ切り替わった場合も、直前の出力が消失したことを確認する。AudioTrackの経路がまだない間はAudioManagerのメディア出力候補を使用する。再接続や経路の更新は再生指示として扱わない。
+
+Media3は既存common-ktxの指定に合わせ、すべて1.9.2の同じバージョン参照へ統一する。以前の1.5.1との混在ではコンパイル時と実行時でAudioTrackProviderのシグネチャが異なっていた。
+
 ## 9. USBビットパーフェクト音声設定
 
 `BitPerfectAudioManager` がUSB出力に対して対応ミキサーの設定を試みる。
@@ -328,7 +340,8 @@ Adaptive Iconのmonochromeにも同じ前景ベクターを参照する。各密
 | MainActivity | 初期画面・再生画面・スプラッシュ・キー入力・SAF選択・情報表示 |
 | DlnaBrowser | タッチ／D-pad共通のサーバー・フォルダー選択 |
 | DlnaClient / DlnaProtocol | SSDP探索、SOAP Browse、DIDL-Lite解析 |
-| PlayerController | ExoPlayer、MediaSession、プレイリスト、シーク、エラー時スキップ |
+| PlayerController | ExoPlayer、MediaSession、再生前のフォーカス取得、プレイリスト、シーク、エラー時スキップ |
+| PlaybackAudioMonitor | 音声フォーカス・出力機器・実AudioTrack経路の監視と割り込み通知 |
 | VideoScanner | 拡張子フィルター、USB列挙、OP/ED整列 |
 | UsbPlaybackBrowser | 登録済みUSBの共通ファイル選択、階層移動、読み取り確認 |
 | SavedUsbFolders | USBドライブとフォルダーの正規化パスの登録・解除 |
@@ -353,7 +366,7 @@ Kotlinソースは `app/src/main/java/jp/nagu/continuousplayer/`、Manifestは `
 | activity-ktx | 1.9.3 |
 | lifecycle-viewmodel-ktx | 2.8.7 |
 | documentfile | 1.1.0 |
-| media3-exoplayer / ui / session | 1.5.1 |
+| media3-exoplayer / ui / session | 1.9.2 |
 | media3-common-ktx | 1.9.2 |
 | gson | 2.11.0 |
 | JUnit | 4.13.2 |
@@ -405,7 +418,7 @@ Kotlinソースは `app/src/main/java/jp/nagu/continuousplayer/`、Manifestは `
 | DlnaSavedFolderTest | 模擬クライアントでのIP・URL変更後の再接続、同名ファイルのIDによるフォーカス復元、オフライン時の再試行と登録維持 |
 | PlaybackFolderTest | 一覧ボタン・戻る・Esc／Oからの現在ファイル表示、曲送り後・多数のフォルダーがある場合のスクロール、TV／キーボードのフォーカス、キャンセルでの位置と再生意図の復元、ホームでのOSへの委譲 |
 | LastPlaybackFolderTest | 保存済みフォルダー選択の復元、SAFの同名ファイルをURIで識別して画面外の行を選択、対象がない場合の先頭行への復帰 |
-| PlaybackSelectionTest | 30秒位置での再生／一時停止復元、別階層・保存済み一覧・DLNA探索への切り替え後のキャンセル、同じ／別ファイルの新規選択、選択中の割り込み、ローカルファイル消失、ホーム終了、一覧背後の再生防止、Escの選択全体キャンセル・リピート抑制、情報画面のEsc、修飾付きOの扱い、背景化・情報表示中の割り込み・消灯と復帰・可視状態のフォーカス移動・回転・TVの手動再開 |
+| PlaybackSelectionTest | 30秒位置での再生／一時停止復元、別階層・保存済み一覧・DLNA探索への切り替え後のキャンセル、同じ／別ファイルの新規選択、選択中の割り込み、ローカルファイル消失、ホーム終了、一覧背後の再生防止、Escの選択全体キャンセル・リピート抑制、情報画面のEsc、修飾付きOの扱い、背景化・情報表示中の割り込み・消灯と復帰・可視状態のフォーカス移動・回転・TVの手動再開、フォーカス喪失・取得拒否・音量低下要求、出力切断通知、一覧・情報表示中の音声割り込み |
 
 ## 14. DLNAクライアント
 

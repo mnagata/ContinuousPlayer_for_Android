@@ -3,11 +3,18 @@ package jp.nagu.continuousplayer
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.session.MediaSession
 
 /**
@@ -18,9 +25,12 @@ import androidx.media3.session.MediaSession
  * 再生エラー発生時は自動的に次のトラックへスキップする。
  * 使用後は [release] を呼んでリソースを解放すること。
  */
+@OptIn(UnstableApi::class)
 class PlayerController(
     context: Context,
-    private val onPlaybackFailure: ((PlaybackException) -> Unit)? = null
+    private val onPlaybackFailure: ((PlaybackException) -> Unit)? = null,
+    private val onPlaybackInterrupted: (() -> Unit)? = null,
+    private val isPlaybackAllowed: () -> Boolean = { true }
 ) {
 
     companion object {
@@ -28,9 +38,41 @@ class PlayerController(
         private const val MAX_ERROR_COUNT = 3
         }
 
-    val player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
+    private val audioMonitor = PlaybackAudioMonitor(context.applicationContext, ::interruptPlayback)
+
+    // Keep the default decoder/output configuration and observe the actual AudioTrack route.
+    // The provider hook also covers USB/HDMI devices that do not send BECOMING_NOISY.
+    @Suppress("DEPRECATION") // Use Media3's default AudioTrack construction and observe its route.
+    private val renderers = object : DefaultRenderersFactory(context) {
+        override fun buildAudioSink(context: Context, enableFloatOutput: Boolean,
+            enableAudioOutputPlaybackParams: Boolean): AudioSink = DefaultAudioSink.Builder(context)
+            .setEnableFloatOutput(enableFloatOutput)
+            .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+            .setAudioTrackProvider { config, attributes, sessionId, trackContext ->
+                DefaultAudioSink.AudioTrackProvider.DEFAULT.getAudioTrack(config, attributes, sessionId, trackContext)
+                    .also(audioMonitor::observeTrack)
+            }.build()
+    }
+
+    private val engine = ExoPlayer.Builder(context, renderers)
+        .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), false)
+        .build().apply {
         repeatMode = Player.REPEAT_MODE_OFF
         }
+
+    /** Every caller uses this gate, so focus refusal cannot start even a brief playback. */
+    val player: Player = object : ForwardingPlayer(engine) {
+        override fun play() = setPlayWhenReady(true)
+
+        override fun setPlayWhenReady(playWhenReady: Boolean) {
+            if (playWhenReady && !isPlaybackAllowed()) return
+            if (!playWhenReady || audioMonitor.requestFocus()) super.setPlayWhenReady(playWhenReady)
+        }
+    }
+
+    val videoFormat get() = engine.videoFormat
+    val audioFormat get() = engine.audioFormat
 
     private val mediaSession: MediaSession = MediaSession.Builder(context, player).build()
 
@@ -120,9 +162,21 @@ class PlayerController(
              }
           }
 
+    private fun interruptPlayback() {
+        player.pause()
+        onPlaybackInterrupted?.invoke()
+    }
+
+    /** Background sessions stay paused and must request focus again on explicit Play. */
+    fun pauseForBackground() {
+        player.pause()
+        audioMonitor.abandonFocus()
+    }
+
         /** プレーヤーおよびMediaSessionのリソースを解放する。 */
     fun release() {
         errorCount = 0
+        audioMonitor.release()
         player.removeListener(errorListener)
         mediaSession.release()
         player.release()

@@ -3,6 +3,13 @@ package jp.nagu.continuousplayer
 import android.Manifest
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
+import android.content.BroadcastReceiver
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.ParcelFileDescriptor
@@ -486,6 +493,8 @@ class PlaybackSelectionTest {
         val wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ContinuousPlayer:D04-test")
         try {
             wakeLock.acquire(60_000)
+            // Delegate only acquisition; playback focus must use the app's normal identity.
+            automation.dropShellPermissionIdentity()
             keyStroke(KeyEvent.KEYCODE_SLEEP)
             BrowserTestUi.waitUntil { !power.isInteractive && !original.playWhenReady }
             var stoppedPosition = 0L
@@ -502,7 +511,16 @@ class PlaybackSelectionTest {
                 assertEquals(stoppedPosition.toDouble(), original.currentPosition.toDouble(), 250.0)
             }
             BrowserTestUi.tap(R.string.resume_playback)
-            BrowserTestUi.waitUntil { original.isPlaying }
+            try {
+                BrowserTestUi.waitUntil { original.isPlaying }
+            } catch (failure: AssertionError) {
+                shell("screencap -p /data/local/tmp/continuousplayer-d05-screen-failure.png")
+                scenario.onActivity {
+                    val monitor = audioMonitor(it)
+                    val focus = PlaybackAudioMonitor::class.java.getDeclaredField("hasFocus").apply { isAccessible = true }.getBoolean(monitor)
+                    throw AssertionError("Resume focus=$focus, intent=${original.playWhenReady}, state=${original.playbackState}, overlay=${it.findViewById<View>(R.id.pause_overlay).visibility}", failure)
+                }
+            }
         } finally {
             try {
                 if (!power.isInteractive) keyStroke(KeyEvent.KEYCODE_WAKEUP)
@@ -517,6 +535,162 @@ class PlaybackSelectionTest {
     private fun dismissTestKeyguard() {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("wm dismiss-keyguard")
         ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
+    }
+
+    @Test fun permanentAudioFocusLossRequiresManualPlay() = checkFocusLoss(AudioManager.AUDIOFOCUS_GAIN)
+
+    @Test fun transientAudioFocusLossRequiresManualPlay() = checkFocusLoss(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+
+    @Test fun duckingRequestPausesInsteadOfLoweringVolume() = checkFocusLoss(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+
+    @Test fun audioFocusLossKeepsExistingPause() = checkFocusLoss(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT, paused = true)
+
+    private fun checkFocusLoss(gain: Int, paused: Boolean = false) = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused)
+        withCompetingFocus(scenario, gain) {
+            BrowserTestUi.waitUntil { !original.playWhenReady }
+            assertRetainedPause(scenario, fixture, original)
+        }
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        SystemClock.sleep(250) // Allow an erroneous GAIN-triggered resume to become observable.
+        assertRetainedPause(scenario, fixture, original)
+        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_play_pause).performClick() }
+        BrowserTestUi.waitUntil { original.isPlaying }
+        scenario.onActivity { assertEquals(1f, original.volume) }
+    }
+
+    @Test fun audioFocusLossInListPreventsResumeOnCancel() = withPlayback { scenario, fixture ->
+        val original = openSelection(scenario, fixture, paused = false)
+        withCompetingFocus(scenario, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT) {
+            // The original session must retain focus during its temporary selection pause.
+            lateinit var activity: MainActivity
+            scenario.onActivity { activity = it }
+            BrowserTestUi.waitUntil { selectionInterrupted(activity) }
+        }
+        cancel(scenario, fixture.directory.name)
+        BrowserTestUi.waitUntil { !browserShowing() }
+        assertRetainedPause(scenario, fixture, original)
+    }
+
+    @Test fun audioFocusLossWithInformationStaysPausedAfterClosing() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_info).performClick() }
+        BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().any { it.findViewById<View>(R.id.info_close) != null } }
+        withCompetingFocus(scenario, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT) {
+            BrowserTestUi.waitUntil { !original.playWhenReady }
+        }
+        scenario.onActivity {
+            WindowInspector.getGlobalWindowViews().single { it.findViewById<View>(R.id.info_close) != null }
+                .findViewById<View>(R.id.info_close).performClick()
+        }
+        assertRetainedPause(scenario, fixture, original)
+    }
+
+    @Test fun activeOutputRemovalKeepsPositionAndWaitsForPlay() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        scenario.onActivity { audioMonitor(it).onOutputsRemoved(currentOutputIds(it)) }
+        assertRetainedPause(scenario, fixture, original)
+        scenario.onActivity { original.play() }
+        BrowserTestUi.waitUntil { original.isPlaying }
+    }
+
+    @Test fun unrelatedOutputRemovalDoesNotPause() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        scenario.onActivity { audioMonitor(it).onOutputsRemoved(setOf(Int.MIN_VALUE)) }
+        scenario.onActivity { assertTrue(original.playWhenReady) }
+    }
+
+    @Test fun activeOutputRemovalInListPreventsResumeOnCancel() = withPlayback { scenario, fixture ->
+        val original = openSelection(scenario, fixture, paused = false)
+        scenario.onActivity { audioMonitor(it).onOutputsRemoved(currentOutputIds(it)) }
+        scenario.onActivity { assertTrue(selectionInterrupted(it)) }
+        cancel(scenario, fixture.directory.name)
+        BrowserTestUi.waitUntil { !browserShowing() }
+        assertRetainedPause(scenario, fixture, original)
+    }
+
+    @Test fun becomingNoisyRequiresManualPlay() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        scenario.onActivity {
+            val monitor = audioMonitor(it)
+            val field = PlaybackAudioMonitor::class.java.getDeclaredField("noisyReceiver").apply { isAccessible = true }
+            (field.get(monitor) as BroadcastReceiver).onReceive(it, Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        }
+        assertRetainedPause(scenario, fixture, original)
+        scenario.onActivity { original.play() }
+        BrowserTestUi.waitUntil { original.isPlaying }
+    }
+
+    @Test fun refusedFocusDoesNotQueueResume() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        val previous = shell("appops get jp.nagu.continuousplayer TAKE_AUDIO_FOCUS")
+        val previousMode = Regex("TAKE_AUDIO_FOCUS: (\\w+)").find(previous)?.groupValues?.get(1) ?: "default"
+        scenario.onActivity { original.pause(); audioMonitor(it).abandonFocus() }
+        try {
+            shell("appops set jp.nagu.continuousplayer TAKE_AUDIO_FOCUS ignore")
+            scenario.onActivity {
+                original.play()
+                assertFalse(original.playWhenReady)
+            }
+            assertRetainedPause(scenario, fixture, original)
+        } finally {
+            shell("appops set jp.nagu.continuousplayer TAKE_AUDIO_FOCUS $previousMode")
+        }
+        assertRetainedPause(scenario, fixture, original)
+        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_play_pause).performClick() }
+        BrowserTestUi.waitUntil { original.isPlaying }
+    }
+
+    private fun shell(command: String): String {
+        val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
+        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
+    }
+
+    private fun assertRetainedPause(scenario: ActivityScenario<MainActivity>, fixture: Fixture, original: Player) {
+        BrowserTestUi.waitUntil { !original.playWhenReady &&
+            fixture.playerView.rootView.findViewById<View>(R.id.pause_overlay).isShown }
+        scenario.onActivity {
+            assertSame(original, fixture.playerView.player)
+            assertFalse(original.playWhenReady)
+            assertEquals(1, original.currentMediaItemIndex)
+            assertEquals(30_000.0, original.currentPosition.toDouble(), 1_500.0)
+            assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility)
+            assertEquals("D01 ED.wav", it.findViewById<TextView>(R.id.overlay_filename).text.toString())
+            assertSame(fixture.playlist, ViewModelProvider(it)[PlayerViewModel::class.java].videos)
+        }
+    }
+
+    private fun withCompetingFocus(scenario: ActivityScenario<MainActivity>, gain: Int, action: () -> Unit) {
+        val manager = InstrumentationRegistry.getInstrumentation().targetContext.getSystemService(AudioManager::class.java)
+        val request = AudioFocusRequest.Builder(gain)
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .setOnAudioFocusChangeListener({}, Handler(Looper.getMainLooper())).build()
+        try {
+            scenario.onActivity { assertEquals(AudioManager.AUDIOFOCUS_REQUEST_GRANTED, manager.requestAudioFocus(request)) }
+            action()
+        } finally {
+            scenario.onActivity { manager.abandonAudioFocusRequest(request) }
+        }
+    }
+
+    private fun audioMonitor(activity: MainActivity): PlaybackAudioMonitor {
+        val controller = MainActivity::class.java.getDeclaredField("playerController").apply { isAccessible = true }.get(activity)
+        return PlayerController::class.java.getDeclaredField("audioMonitor").apply { isAccessible = true }
+            .get(controller) as PlaybackAudioMonitor
+    }
+
+    private fun selectionInterrupted(activity: MainActivity): Boolean {
+        val selection = MainActivity::class.java.getDeclaredField("playbackSelection").apply { isAccessible = true }.get(activity)
+        return selection != null && selection.javaClass.getDeclaredField("interrupted").apply { isAccessible = true }.getBoolean(selection)
+    }
+
+    private fun currentOutputIds(activity: MainActivity): Set<Int> {
+        val ids = activity.getSystemService(AudioManager::class.java).getAudioDevicesForAttributes(
+            AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .map { it.id }.toSet()
+        assertTrue("An output route is required for this test", ids.isNotEmpty())
+        return ids
     }
 
     private fun positionAtThirty(scenario: ActivityScenario<MainActivity>, fixture: Fixture, paused: Boolean): Player {
