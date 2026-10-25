@@ -115,83 +115,148 @@
             android:layout_height="match_parent"
             android:importantForAccessibility="no" />
 
-         <!-- Pause toolbar -->
+         <!-- Navigation, filename and transport stay in separate rows at every screen width. -->
          <LinearLayout
             android:id="@+id/pause_overlay"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="wrap_content"
             android:layout_gravity="top"
-            android:background="#B0000000"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
+            android:background="#D9101723"
+            android:orientation="vertical"
             android:paddingHorizontal="8dp"
+            android:paddingBottom="4dp"
             android:visibility="gone">
 
-             <ImageButton
-                android:id="@+id/btn_overlay_home"
-                android:layout_width="48dp"
+             <LinearLayout
+                android:id="@+id/player_navigation_controls"
+                android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:background="@drawable/player_button_background"
-                android:contentDescription="@string/return_to_home"
-                android:nextFocusLeft="@id/btn_overlay_exit"
-                android:nextFocusRight="@id/btn_overlay_play_pause"
-                android:src="@drawable/ic_home"
-                android:tooltipText="@string/return_to_home" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                 <ImageButton
+                    android:id="@+id/btn_overlay_home"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/return_to_home"
+                    android:tooltipText="@string/return_to_home"
+                    android:src="@drawable/ic_home"
+                    android:nextFocusLeft="@id/btn_overlay_exit"
+                    android:nextFocusRight="@id/btn_overlay_select_folder"
+                    android:nextFocusUp="@id/btn_overlay_play_pause"
+                    android:nextFocusDown="@id/btn_overlay_play_pause"
+                    android:nextFocusForward="@id/btn_overlay_select_folder" />
+                 <ImageButton
+                    android:id="@+id/btn_overlay_select_folder"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/select_folder"
+                    android:tooltipText="@string/select_folder"
+                    android:src="@drawable/ic_folder_open"
+                    android:nextFocusLeft="@id/btn_overlay_home"
+                    android:nextFocusRight="@id/btn_overlay_info"
+                    android:nextFocusUp="@id/btn_overlay_play_pause"
+                    android:nextFocusDown="@id/btn_overlay_play_pause"
+                    android:nextFocusForward="@id/btn_overlay_info" />
+                 <ImageButton
+                    android:id="@+id/btn_overlay_info"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/info"
+                    android:tooltipText="@string/info"
+                    android:src="@drawable/ic_info"
+                    android:nextFocusLeft="@id/btn_overlay_select_folder"
+                    android:nextFocusRight="@id/btn_overlay_exit"
+                    android:nextFocusUp="@id/btn_overlay_play_pause"
+                    android:nextFocusDown="@id/btn_overlay_play_pause"
+                    android:nextFocusForward="@id/btn_overlay_exit" />
+                 <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+                 <ImageButton
+                    android:id="@+id/btn_overlay_exit"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/exit_app"
+                    android:tooltipText="@string/exit_app"
+                    android:src="@drawable/ic_close"
+                    android:nextFocusLeft="@id/btn_overlay_info"
+                    android:nextFocusRight="@id/btn_overlay_home"
+                    android:nextFocusUp="@id/btn_overlay_play_pause"
+                    android:nextFocusDown="@id/btn_overlay_play_pause"
+                    android:nextFocusForward="@id/btn_overlay_previous" />
+             </LinearLayout>
 
              <TextView
                 android:id="@+id/overlay_filename"
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:minHeight="28dp"
+                android:paddingHorizontal="8dp"
+                android:gravity="center"
                 android:ellipsize="middle"
                 android:maxLines="1"
                 android:textColor="@android:color/white"
                 android:textSize="14sp" />
 
-             <ImageButton
-                android:id="@+id/btn_overlay_play_pause"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="@drawable/player_button_background"
-                android:contentDescription="@string/resume_playback"
-                android:nextFocusLeft="@id/btn_overlay_home"
-                android:nextFocusRight="@id/btn_overlay_info"
-                android:src="@drawable/ic_play"
-                android:tooltipText="@string/resume_playback" />
-
-             <ImageButton
-                android:id="@+id/btn_overlay_info"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="@drawable/player_button_background"
-                android:contentDescription="@string/info"
-                android:nextFocusLeft="@id/btn_overlay_play_pause"
-                android:nextFocusRight="@id/btn_overlay_select_folder"
-                android:src="@drawable/ic_info"
-                android:tooltipText="@string/info" />
-
-             <ImageButton
-                android:id="@+id/btn_overlay_select_folder"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="@drawable/player_button_background"
-                android:contentDescription="@string/select_folder"
-                android:nextFocusLeft="@id/btn_overlay_info"
-                android:nextFocusRight="@id/btn_overlay_exit"
-                android:src="@drawable/ic_folder_open"
-                android:tooltipText="@string/select_folder" />
-
-             <ImageButton
-                android:id="@+id/btn_overlay_exit"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/player_button_background"
-                android:contentDescription="@string/exit_app"
-                android:nextFocusLeft="@id/btn_overlay_select_folder"
-                android:nextFocusRight="@id/btn_overlay_home"
-                android:src="@drawable/ic_close"
-                android:tooltipText="@string/exit_app" />
+             <LinearLayout
+                android:id="@+id/player_transport_controls"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center">
+                 <ImageButton
+                    android:id="@+id/btn_overlay_previous"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/previous_file"
+                    android:tooltipText="@string/previous_file"
+                    android:src="@drawable/ic_previous"
+                    android:nextFocusLeft="@id/btn_overlay_next"
+                    android:nextFocusRight="@id/btn_overlay_rewind"
+                    android:nextFocusUp="@id/btn_overlay_info"
+                    android:nextFocusDown="@id/btn_overlay_info"
+                    android:nextFocusForward="@id/btn_overlay_rewind" />
+                 <ImageButton
+                    android:id="@+id/btn_overlay_rewind"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/rewind_ten_seconds"
+                    android:tooltipText="@string/rewind_ten_seconds"
+                    android:src="@drawable/ic_rewind_10"
+                    android:nextFocusLeft="@id/btn_overlay_previous"
+                    android:nextFocusRight="@id/btn_overlay_play_pause"
+                    android:nextFocusUp="@id/btn_overlay_info"
+                    android:nextFocusDown="@id/btn_overlay_info"
+                    android:nextFocusForward="@id/btn_overlay_play_pause" />
+                 <ImageButton
+                    android:id="@+id/btn_overlay_play_pause"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/resume_playback"
+                    android:tooltipText="@string/resume_playback"
+                    android:src="@drawable/ic_play"
+                    android:nextFocusLeft="@id/btn_overlay_rewind"
+                    android:nextFocusRight="@id/btn_overlay_forward"
+                    android:nextFocusUp="@id/btn_overlay_info"
+                    android:nextFocusDown="@id/btn_overlay_info"
+                    android:nextFocusForward="@id/btn_overlay_forward" />
+                 <ImageButton
+                    android:id="@+id/btn_overlay_forward"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/forward_ten_seconds"
+                    android:tooltipText="@string/forward_ten_seconds"
+                    android:src="@drawable/ic_forward_10"
+                    android:nextFocusLeft="@id/btn_overlay_play_pause"
+                    android:nextFocusRight="@id/btn_overlay_next"
+                    android:nextFocusUp="@id/btn_overlay_info"
+                    android:nextFocusDown="@id/btn_overlay_info"
+                    android:nextFocusForward="@id/btn_overlay_next" />
+                 <ImageButton
+                    android:id="@+id/btn_overlay_next"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/next_file"
+                    android:tooltipText="@string/next_file"
+                    android:src="@drawable/ic_next"
+                    android:nextFocusLeft="@id/btn_overlay_forward"
+                    android:nextFocusRight="@id/btn_overlay_previous"
+                    android:nextFocusUp="@id/btn_overlay_info"
+                    android:nextFocusDown="@id/btn_overlay_info"
+                    android:nextFocusForward="@id/btn_overlay_home" />
+             </LinearLayout>
          </LinearLayout>
 
          <!-- Portrait video info (centered in bottom dark area) -->

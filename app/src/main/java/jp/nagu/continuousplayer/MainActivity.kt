@@ -26,12 +26,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -155,6 +157,17 @@ class MainActivity : AppCompatActivity() {
         playerContainer = findViewById(R.id.player_container)
         playerView = findViewById(R.id.player_view)
         pauseOverlay = findViewById(R.id.pause_overlay)
+        val controlPaddingLeft = pauseOverlay.paddingLeft
+        val controlPaddingRight = pauseOverlay.paddingRight
+        val controlPaddingBottom = pauseOverlay.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(pauseOverlay) { view, insets ->
+            // Keep controls clear of notches and transient system bars without moving the video.
+            val safe = insets.getInsetsIgnoringVisibility(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(controlPaddingLeft + safe.left, safe.top,
+                controlPaddingRight + safe.right, controlPaddingBottom)
+            insets
+        }
         overlayFilename = findViewById(R.id.overlay_filename)
         portraitVideoInfo = findViewById(R.id.portrait_video_info)
 
@@ -178,6 +191,23 @@ class MainActivity : AppCompatActivity() {
         overlayPlayPauseButton.setOnClickListener {
             togglePlayPause()
               }
+
+        findViewById<ImageButton>(R.id.btn_overlay_previous).setOnClickListener {
+            playerController?.previousVideo()
+            updatePauseOverlay()
+        }
+        findViewById<ImageButton>(R.id.btn_overlay_rewind).setOnClickListener {
+            playerController?.seekBackward()
+            updatePauseOverlay()
+        }
+        findViewById<ImageButton>(R.id.btn_overlay_forward).setOnClickListener {
+            playerController?.seekForward()
+            updatePauseOverlay()
+        }
+        findViewById<ImageButton>(R.id.btn_overlay_next).setOnClickListener {
+            playerController?.nextVideo()
+            updatePauseOverlay()
+        }
 
         findViewById<ImageButton>(R.id.btn_overlay_info).setOnClickListener {
             showInfoDialog()
@@ -561,6 +591,14 @@ class MainActivity : AppCompatActivity() {
                }
 
         controller.player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
+                updatePauseOverlay()
+            }
+
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                updatePauseOverlay()
+            }
+
             override fun onMediaItemTransition(
                 mediaItem: androidx.media3.common.MediaItem?,
                 reason: Int
@@ -742,6 +780,8 @@ class MainActivity : AppCompatActivity() {
         val show = userPaused && !isInBackground && playerController != null &&
             playbackSelection == null && playbackInformation == null
         pauseOverlay.visibility = if (show) View.VISIBLE else View.GONE
+        if (show && !wasVisible) ViewCompat.requestApplyInsets(pauseOverlay)
+        updateTransportButtons()
         if (show) {
             val index = playerController?.player?.currentMediaItemIndex ?: 0
             val video = viewModel.videos.getOrNull(index)
@@ -752,6 +792,22 @@ class MainActivity : AppCompatActivity() {
                }
         if (!show && wasVisible && isTelevision) playerView.requestFocus()
           }
+
+    private fun updateTransportButtons() {
+        val player = playerController?.player
+        val focused = currentFocus?.takeIf { isDescendantOf(it, pauseOverlay) }
+        findViewById<View>(R.id.btn_overlay_previous).isEnabled = player != null &&
+            player.hasPreviousMediaItem() && player.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+        findViewById<View>(R.id.btn_overlay_next).isEnabled = player != null &&
+            player.hasNextMediaItem() && player.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+        val canSeek = player != null && player.isCurrentMediaItemSeekable &&
+            player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+        findViewById<View>(R.id.btn_overlay_rewind).isEnabled = canSeek
+        findViewById<View>(R.id.btn_overlay_forward).isEnabled = canSeek
+        if (pauseOverlay.isShown && focused != null && !focused.isEnabled) {
+            overlayPlayPauseButton.requestFocus()
+        }
+    }
 
 @OptIn(UnstableApi::class)
 private fun updatePortraitVideoInfo() {

@@ -6,6 +6,10 @@
     <string name="info">情報</string>
     <string name="playback_info_label">再生中</string>
     <string name="no_mp4_found">No mp4 files found in this folder</string>
+    <string name="previous_file">前のファイル</string>
+    <string name="rewind_ten_seconds">10秒戻す</string>
+    <string name="forward_ten_seconds">10秒進める</string>
+    <string name="next_file">次のファイル</string>
     <string name="resume_playback">Resume playback</string>
     <string name="return_to_home">TOP画面に戻る</string>
     <string name="tv_controls_hint">再生中: ← 前のファイル · → 次のファイル\n↑ 10秒戻す · ↓ 10秒進める · 決定 再生／一時停止\n一時停止中: 方向キーでボタンを選択 · 決定で実行</string>
