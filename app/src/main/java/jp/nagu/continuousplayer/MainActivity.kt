@@ -844,7 +844,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun mustShowPlaybackControls(): Boolean {
         val player = playerController?.player ?: return false
-        return userPaused || audioOnlyMedia || player.playbackState == Player.STATE_ENDED ||
+        return userPaused || audioOnlyMedia || playerController?.isPlaybackCompleted == true ||
             player.playerError != null || accessibilityManager.isTouchExplorationEnabled
     }
 
@@ -858,7 +858,7 @@ class MainActivity : AppCompatActivity() {
         if (show && !wasVisible) ViewCompat.requestApplyInsets(pauseOverlay)
         updateTransportButtons()
         val player = playerController?.player
-        val ended = player?.playbackState == Player.STATE_ENDED
+        val ended = playerController?.isPlaybackCompleted == true
         val failed = player?.playerError != null
         val playing = player?.playWhenReady == true && !ended && !failed
         val playPauseLabel = getString(if (playing) R.string.pause_playback else R.string.resume_playback)
@@ -896,8 +896,8 @@ class MainActivity : AppCompatActivity() {
             player.hasNextMediaItem() && player.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
         val canSeek = player != null && player.isCurrentMediaItemSeekable &&
             player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
-        findViewById<View>(R.id.btn_overlay_rewind).isEnabled = canSeek
-        findViewById<View>(R.id.btn_overlay_forward).isEnabled = canSeek
+        findViewById<View>(R.id.btn_overlay_rewind).isEnabled = canSeek && player?.isCommandAvailable(Player.COMMAND_SEEK_BACK) == true
+        findViewById<View>(R.id.btn_overlay_forward).isEnabled = canSeek && player?.isCommandAvailable(Player.COMMAND_SEEK_FORWARD) == true
         if (pauseOverlay.isShown && focused != null && !focused.isEnabled) {
             overlayPlayPauseButton.requestFocus()
         }
