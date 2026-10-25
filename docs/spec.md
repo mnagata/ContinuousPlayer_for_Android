@@ -82,7 +82,7 @@ TVアニメのOP/EDを中心に、選択したフォルダーの動画・音声�
 | 要素 | 仕様 |
 |---|---|
 | PlayerView | 全画面、Media3標準コントローラは無効、ローディングアイコンは非表示 |
-| touch_overlay | 全面の透明Viewでタップ・フリングを受ける |
+| touch_overlay | 全面の透明Viewでタップ・スワイプを受ける |
 | pause_overlay | 上端、暗色の半透明背景。共通操作・ファイル名・再生操作の3行。表示／非表示でPlayerViewの領域を変えない |
 | portrait_video_info | 縦画面のみ、下端から120dpの位置にメディア情報を表示 |
 
@@ -138,10 +138,18 @@ OK・I・Esc・戻る・その他のダイアログ終了は、一覧キャン�
 | シングル/ダブルタップ：左1/3 | 10秒巻き戻し |
 | シングル/ダブルタップ：中央1/3 | 再生 / 一時停止 |
 | シングル/ダブルタップ：右1/3 | 10秒早送り |
-| 右フリング | 前のファイル |
-| 左フリング | 次のファイル |
+| 右スワイプ | 前のファイル |
+| 左スワイプ | 次のファイル |
 
-フリングは横移動が縦移動より大きく、移動距離100px・速度100px/秒をともに超える場合に判定する。
+単指のスワイプはACTION_DOWNからACTION_UPまでの移動量を使い、横移動70dp以上、かつ横移動が縦移動の1.5倍以上の場合に判定する。画面密度からpxへ換算し、境界の70dp・1.5倍を含める。速度やGestureDetectorのonFling通知は条件にしない。右は前のファイル、左は次のファイルへ1回だけ移動し、元の再生／一時停止の意図を維持する。
+
+ActivityでViewGroupが入力を部品別に分割する前の指の本数を確認する。2本目が操作ボタン上に加わった場合もメディア側のGestureDetectorをキャンセルし、残る1本が動いても同じ入力列ではタップ・曲送り・シークを実行しない。ACTION_CANCEL、回転、ウィンドウフォーカス喪失、背景化、セッション終了でも入力途中の状態とタップの重複判定を破棄する。次の新しいACTION_DOWNから通常の入力を再開する。
+
+スワイプが成立した場合やOSのtouch slopを超えて動いた場合は、タップ検出をキャンセルして二重実行を防ぐ。ダブルタップの2回目のDOWNからスワイプへ変わる場合も、離す前にはタップ操作を実行しない。初回タップはGestureDetectorのonSingleTapUpで、指を離した時点に実行する。onSingleTapConfirmedの確定待ちは使わない。
+
+直前に実行したタップと同じ3分割領域・近い位置への追加タップは、直前のUPから次のDOWNまで300ms以内なら追加実行しない。距離はOSのscaledDoubleTapSlopを半径とする2次元距離で判定し、時間・距離の境界を含める。OSのgetDoubleTapTimeoutが300msより長ければその値を使う。別領域または許容距離外のタップはすぐに受け付け、新しい基準にする。抑制したタップで時間を延長しない。スワイプ・多指・取消・画面の中断に加え、画面ボタン・再生ショートカットの実行で重複判定をリセットする。
+
+OSのtouch slop・長押し判定はGestureDetectorに従い、長押しをタップに変えない。独自の入力遅延や設定項目は追加しない。実機のタッチ感度やアクセシビリティ生成入力は別途受入確認が必要。マウス入力の分離は後続D13の対象。
 
 ### 5.2 リモコン・キー操作
 
@@ -372,7 +380,7 @@ Adaptive Iconのmonochromeにも同じ前景ベクターを参照する。各密
 | DlnaSelectionDialog | SAF・USB・DLNA共通の一覧、読み込み、エラー、登録操作、縦横レイアウト |
 | DlnaFolderSorter | SAF・DLNAのフォルダーと保存済みSAFの季節順整列 |
 | UsbFileBrowser | 外部ストレージ一覧、読み取り専用のフォルダー探索、file URIプレイリスト選択 |
-| GestureHandler | タッチ位置とフリング判定 |
+| GestureHandler / SwipeDirection / TapSuppression | 単指の移動量・方向判定、タップ即応と重複抑制、多指・中断の取消 |
 | BitPerfectAudioManager | USBミキサー設定と出力情報 |
 | PlayerViewModel / PlaybackFolder | メモリー内の一覧・再生画面フラグと、SAF・USB・DLNAの再生元フォルダー |
 | VideoItem | uri、displayName、size、lastModified、任意のmimeType |
@@ -440,6 +448,8 @@ Kotlinソースは `app/src/main/java/jp/nagu/continuousplayer/`、Manifestは `
 | DlnaSavedFolderTest | 模擬クライアントでのIP・URL変更後の再接続、同名ファイルのIDによるフォーカス復元、オフライン時の再試行と登録維持 |
 | PlaybackFolderTest | 一覧ボタン・戻る・Esc／Oからの現在ファイル表示、曲送り後・多数のフォルダーがある場合のスクロール、TV／キーボードのフォーカス、キャンセルでの位置と再生意図の復元、ホームでのOSへの委譲 |
 | LastPlaybackFolderTest | 保存済みフォルダー選択の復元、SAFの同名ファイルをURIで識別して画面外の行を選択、対象がない場合の先頭行への復帰 |
+| GesturePlaybackTest | 低速・距離／角度境界、前後移動1回と再生意図維持、多指・キャンセル・背景化・回転、初回タップ即応、連続タップ・別領域・許容距離外・OS設定に応じた短押し／長押し・ボタン介在の検証 |
+| TapSuppressionTest | 300msと許容距離の境界、領域判定、抑制時間の非延長、リセット、OSの短い／長い判定時間 |
 | ModalPlaybackTest | 実Media3／platform controller、モーダル中の新規接続、再生・シーク・停止・キュー変更等の拒否、閉じた後の許可復帰、文字入力・エラー・前面UI、一覧の決定による新規選択と遅延ヘルパーの抑止 |
 | KeyboardPlaybackTest | Space・Enter・H・Shift＋左右、修飾キー・文字入力・部品フォーカスの優先、Tab／Shift＋Tab、TVの一時停止後のキーアップ・長押しによる二重操作防止 |
 | HomeMenuTest | ホームの名称、その他→終了だけがタスクを削除すること、戻る／Escのメニュー取消、TV方向・決定、Tab・Enter、背景化時のメニュー終了 |

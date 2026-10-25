@@ -11,8 +11,8 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
@@ -54,7 +54,8 @@ class MainActivity : AppCompatActivity() {
     private var playerController: PlayerController? = null
     private var bitPerfectAudio: BitPerfectAudioManager? = null
     private lateinit var audioManager: AudioManager
-    private var gestureDetector: GestureDetector? = null
+    private var gestureHandler: GestureHandler? = null
+    private var multiTouchSequence = false
 
     private lateinit var folderSelectContainer: LinearLayout
     private lateinit var playerContainer: FrameLayout
@@ -190,31 +191,38 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.btn_overlay_home).setOnClickListener { returnHome() }
 
         overlayPlayPauseButton.setOnClickListener {
+            gestureHandler?.cancel()
             togglePlayPause()
               }
 
         findViewById<ImageButton>(R.id.btn_overlay_previous).setOnClickListener {
+            gestureHandler?.cancel()
             playerController?.previousVideo()
             updatePauseOverlay()
         }
         findViewById<ImageButton>(R.id.btn_overlay_rewind).setOnClickListener {
+            gestureHandler?.cancel()
             playerController?.seekBackward()
             updatePauseOverlay()
         }
         findViewById<ImageButton>(R.id.btn_overlay_forward).setOnClickListener {
+            gestureHandler?.cancel()
             playerController?.seekForward()
             updatePauseOverlay()
         }
         findViewById<ImageButton>(R.id.btn_overlay_next).setOnClickListener {
+            gestureHandler?.cancel()
             playerController?.nextVideo()
             updatePauseOverlay()
         }
 
         findViewById<ImageButton>(R.id.btn_overlay_info).setOnClickListener {
+            gestureHandler?.cancel()
             showInfoDialog()
               }
 
         findViewById<ImageButton>(R.id.btn_overlay_select_folder).setOnClickListener {
+            gestureHandler?.cancel()
             openCurrentPlaybackSelection()
               }
 
@@ -248,6 +256,20 @@ class MainActivity : AppCompatActivity() {
             showFolderSelect()
              }
           }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) multiTouchSequence = false
+        if (event.pointerCount > 1) multiTouchSequence = true
+        if (multiTouchSequence || event.actionMasked == MotionEvent.ACTION_CANCEL) gestureHandler?.cancel()
+        // Observe the full stream before ViewGroup splits pointers between controls and media.
+        try {
+            return super.dispatchTouchEvent(event)
+        } finally {
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                multiTouchSequence = false
+            }
+        }
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val key = event.deviceId to event.keyCode
@@ -301,6 +323,7 @@ class MainActivity : AppCompatActivity() {
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             // Keep the whole gesture even when its action changes the screen or focus.
             playbackKeyPresses[key] = event.downTime
+            gestureHandler?.cancel()
             action()
         }
         return true
@@ -597,9 +620,10 @@ class MainActivity : AppCompatActivity() {
             controller,
             onPlayPauseToggled = { updatePauseOverlay() }
         )
-        gestureDetector = GestureDetector(this, handler)
+        gestureHandler = handler
         touchOverlay.setOnTouchListener { _, event ->
-            if (!isPlaybackInputBlocked()) gestureDetector?.onTouchEvent(event)
+            if (isPlaybackInputBlocked() || multiTouchSequence) gestureHandler?.cancel()
+            else gestureHandler?.onTouchEvent(event)
             true
                }
 
@@ -607,6 +631,8 @@ class MainActivity : AppCompatActivity() {
           }
 
     private fun stopPlayback() {
+        gestureHandler?.cancel()
+        gestureHandler = null
         playbackSelection = null
         playbackInformation = null
         informationJob?.cancel()
@@ -624,7 +650,6 @@ class MainActivity : AppCompatActivity() {
         playerView.player = null
         playerController?.release()
         playerController = null
-        gestureDetector = null
         viewModel.isPlayerScreen = false
           }
 
@@ -847,6 +872,7 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
+        gestureHandler?.cancel()
         super.onConfigurationChanged(newConfig)
         if (::dlnaBrowser.isInitialized) dlnaBrowser.onConfigurationChanged()
         if (::safBrowser.isInitialized) safBrowser.onConfigurationChanged()
@@ -903,6 +929,7 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
+        if (!hasFocus) gestureHandler?.cancel()
         super.onWindowFocusChanged(hasFocus)
         updateExternalPlaybackCommands()
         if (hasFocus && ::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null && playbackInformation == null) {
@@ -911,6 +938,7 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onStop() {
+        gestureHandler?.cancel()
         homeMenu?.dismiss()
         lastPlaybackFolder.save(viewModel.playbackFolder)
         super.onStop()

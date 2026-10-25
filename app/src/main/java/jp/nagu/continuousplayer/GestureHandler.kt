@@ -1,92 +1,114 @@
 package jp.nagu.continuousplayer
 
-import android.util.Log
+import android.os.SystemClock
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
-import kotlin.math.abs
+import android.view.ViewConfiguration
 
-/**
- * プレーヤー画面のタッチジェスチャーを処理するハンドラ。
- *
- * - **シングルタップ（左1/3）**: 10秒巻き戻し
- * - **シングルタップ（中央1/3）**: 再生/一時停止の切り替え
- * - **シングルタップ（右1/3）**: 10秒早送り
- * - **ダブルタップ（左1/3）**: 10秒巻き戻し
- * - **ダブルタップ（中央1/3）**: 再生/一時停止の切り替え
- * - **ダブルタップ（右1/3）**: 10秒早送り
- * - **左右フリング**: 前/次の動画へスキップ
- *
- * @param view ジェスチャーを受け取るオーバーレイView（タップ位置の判定に使用）
- * @param controller 再生操作を委譲する [PlayerController]
- * @param onPlayPauseToggled 再生/一時停止が切り替わった時のコールバック
- */
+/** Handle immediate taps and classify single-pointer swipes at release. */
 class GestureHandler(
     private val view: View,
     private val controller: PlayerController,
     private val onPlayPauseToggled: () -> Unit = {}
 ) : GestureDetector.SimpleOnGestureListener() {
+    private val configuration = ViewConfiguration.get(view.context)
+    // Receive each completed tap immediately; suppress extra taps without a confirmation timer.
+    private val detector = GestureDetector(view.context, this).apply { setOnDoubleTapListener(null) }
+    private val touchSlop = configuration.scaledTouchSlop.toFloat()
+    private val tapSuppression = TapSuppression(
+        systemDoubleTapTimeoutMs = ViewConfiguration.getDoubleTapTimeout().toLong(),
+        proximityPx = configuration.scaledDoubleTapSlop.toFloat()
+    )
+    private var pointerId = MotionEvent.INVALID_POINTER_ID
+    private var startX = 0f
+    private var startY = 0f
+    private var tapEligible = false
 
-    private val swipeThreshold = 100
-    private val swipeVelocityThreshold = 100
+    fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL || event.pointerCount > 1 ||
+            event.actionMasked == MotionEvent.ACTION_POINTER_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_UP
+        ) {
+            // Once a second finger appears, reject the whole stream until a fresh DOWN.
+            cancel()
+            return true
+        }
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            if (pointerId != MotionEvent.INVALID_POINTER_ID) cancel()
+            pointerId = event.getPointerId(0)
+            startX = event.x
+            startY = event.y
+            tapEligible = true
+            detector.onTouchEvent(event)
+            return true
+        }
+        if (pointerId == MotionEvent.INVALID_POINTER_ID) return true
+        val index = event.findPointerIndex(pointerId)
+        if (index < 0) {
+            cancel()
+            return true
+        }
+        for (history in 0 until event.historySize) {
+            updateTapEligibility(event.getHistoricalX(index, history), event.getHistoricalY(index, history))
+        }
+        updateTapEligibility(event.getX(index), event.getY(index))
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> detector.onTouchEvent(event)
+            MotionEvent.ACTION_UP -> {
+                val direction = SwipeDirection.fromDistance(event.getX(index) - startX,
+                    event.getY(index) - startY, view.resources.displayMetrics.density)
+                if (direction != null || !tapEligible) {
+                    // A drag never becomes a tap, including after an accepted nearby tap.
+                    cancel()
+                    when (direction) {
+                        SwipeDirection.PREVIOUS -> controller.previousVideo()
+                        SwipeDirection.NEXT -> controller.nextVideo()
+                        null -> Unit
+                    }
+                } else {
+                    pointerId = MotionEvent.INVALID_POINTER_ID
+                    detector.onTouchEvent(event)
+                }
+            }
+            else -> cancel()
+        }
+        return true
+    }
+
+    private fun updateTapEligibility(x: Float, y: Float) {
+        val dx = x - startX
+        val dy = y - startY
+        if (dx * dx + dy * dy > touchSlop * touchSlop) tapEligible = false
+    }
+
+    fun cancel() {
+        pointerId = MotionEvent.INVALID_POINTER_ID
+        tapEligible = false
+        tapSuppression.reset()
+        val now = SystemClock.uptimeMillis()
+        val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        try { detector.onTouchEvent(event) } finally { event.recycle() }
+    }
 
     override fun onDown(e: MotionEvent): Boolean = true
 
-    override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+    override fun onSingleTapUp(e: MotionEvent): Boolean {
         val third = view.width / 3f
-        when {
-            e.x < third -> controller.seekBackward(10_000L)
-            e.x < third * 2 -> {
-                controller.togglePlayPause()
-                onPlayPauseToggled()
-             }
-            else -> controller.seekForward(10_000L)
-         }
+        val region = when {
+            e.x < third -> TapRegion.REWIND
+            e.x < third * 2 -> TapRegion.TOGGLE
+            else -> TapRegion.FORWARD
+        }
+        if (tapSuppression.accept(region, e.x, e.y, e.downTime, e.eventTime)) {
+            when (region) {
+                TapRegion.REWIND -> controller.seekBackward(10_000L)
+                TapRegion.TOGGLE -> {
+                    controller.togglePlayPause()
+                    onPlayPauseToggled()
+                }
+                TapRegion.FORWARD -> controller.seekForward(10_000L)
+            }
+        }
         return true
-     }
-
-    override fun onDoubleTap(e: MotionEvent): Boolean {
-        val third = view.width / 3f
-        when {
-            e.x < third -> controller.seekBackward(10_000L)
-            e.x < third * 2 -> {
-                controller.togglePlayPause()
-                onPlayPauseToggled()
-             }
-            else -> controller.seekForward(10_000L)
-         }
-        return true
-     }
-
-    override fun onFling(
-        e1: MotionEvent?,
-        e2: MotionEvent,
-        velocityX: Float,
-        velocityY: Float
-     ): Boolean {
-        Log.d(TAG, "onFling called: e1=$e1, velocityX=$velocityX, velocityY=$velocityY")
-        val start = e1 ?: run {
-            Log.d(TAG, "onFling: e1 is null")
-            return false
-         }
-        val dx = e2.x - start.x
-        val dy = e2.y - start.y
-        Log.d(TAG, "onFling: dx=$dx, dy=$dy, absDx=${abs(dx)}, absVelX=${abs(velocityX)}")
-        if (abs(dx) > abs(dy) && abs(dx) > swipeThreshold && abs(velocityX) > swipeVelocityThreshold) {
-            if (dx > 0) {
-                Log.d(TAG, "onFling: previousVideo")
-                controller.previousVideo()
-             } else {
-                Log.d(TAG, "onFling: nextVideo")
-                controller.nextVideo()
-             }
-            return true
-         }
-        Log.d(TAG, "onFling: thresholds not met")
-        return false
-     }
-
-    companion object {
-        private const val TAG = "GestureHandler"
-     }
+    }
 }
