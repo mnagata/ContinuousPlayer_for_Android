@@ -1,7 +1,12 @@
 package jp.nagu.continuousplayer
 
+import android.Manifest
+import android.app.KeyguardManager
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -21,6 +26,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.*
+import org.junit.Assume.assumeFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -264,7 +270,7 @@ class PlaybackSelectionTest {
         val original = fixture.playerView.player!!
         scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_info).performClick() }
         BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().any {
-            it.findViewById<View>(R.id.info_close) != null
+            it.findViewById<View>(R.id.info_close) != null && it.hasWindowFocus()
         } }
         keyStroke(KeyEvent.KEYCODE_ESCAPE)
         BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().none {
@@ -313,17 +319,218 @@ class PlaybackSelectionTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, SystemClock.uptimeMillis(),
             action, code, repeat, modifiers, -1, 0, 0,
-            if (code == KeyEvent.KEYCODE_BACK) InputDevice.SOURCE_DPAD else InputDevice.SOURCE_KEYBOARD), true))
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_DPAD_CENTER)
+                InputDevice.SOURCE_DPAD else InputDevice.SOURCE_KEYBOARD), true))
         instrumentation.waitForIdleSync()
     }
 
-    private fun openSelection(scenario: ActivityScenario<MainActivity>, fixture: Fixture, paused: Boolean): Player {
+    @Test fun backgroundFromPlaybackReturnsPausedUntilExplicitPlay() = checkBackgroundReturn(paused = false)
+
+    @Test fun backgroundFromPauseKeepsPositionAndControls() = checkBackgroundReturn(paused = true)
+
+    private fun checkBackgroundReturn(paused: Boolean) = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused)
+        repeat(2) {
+            scenario.moveToState(Lifecycle.State.CREATED)
+            var stoppedPosition = 0L
+            scenario.onActivity {
+                assertSame(original, fixture.playerView.player)
+                assertFalse(original.playWhenReady)
+                stoppedPosition = original.currentPosition
+                assertEquals(View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility)
+            }
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            scenario.onActivity {
+                assertSame(original, fixture.playerView.player)
+                assertFalse(original.playWhenReady)
+                assertEquals(1, original.currentMediaItemIndex)
+                assertEquals(stoppedPosition.toDouble(), original.currentPosition.toDouble(), 250.0)
+                assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility)
+                assertEquals("D01 ED.wav", it.findViewById<TextView>(R.id.overlay_filename).text.toString())
+                val model = ViewModelProvider(it)[PlayerViewModel::class.java]
+                assertSame(fixture.playlist, model.videos)
+                assertEquals(fixture.folder, model.playbackFolder)
+            }
+        }
+        scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_play_pause).performClick() }
+        BrowserTestUi.waitUntil { original.isPlaying }
+        scenario.onActivity { assertEquals(View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility) }
+    }
+
+    @Test fun interruptionWithInformationOpenStaysPausedAfterClosing() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_info).performClick() }
+        BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().any {
+            it.findViewById<View>(R.id.info_close) != null
+        } }
+        scenario.moveToState(Lifecycle.State.CREATED)
+        var stoppedPosition = 0L
+        scenario.onActivity { stoppedPosition = original.currentPosition; assertFalse(original.playWhenReady) }
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        scenario.onActivity {
+            assertFalse(original.playWhenReady)
+            WindowInspector.getGlobalWindowViews().single { it.findViewById<View>(R.id.info_close) != null }
+                .findViewById<View>(R.id.info_close).performClick()
+            assertSame(original, fixture.playerView.player)
+            assertFalse(original.playWhenReady)
+            assertEquals(stoppedPosition.toDouble(), original.currentPosition.toDouble(), 250.0)
+            assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility)
+            assertFalse(browserShowing())
+        }
+    }
+
+    @Test fun visibleFocusChangeKeepsPlaybackRunning() = checkVisibleFocusChange(paused = false)
+
+    @Test fun visibleFocusChangeKeepsPause() = checkVisibleFocusChange(paused = true)
+
+    private fun checkVisibleFocusChange(paused: Boolean) = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused)
+        // STARTED is visible but paused in the Activity lifecycle; it must not count as background.
+        scenario.moveToState(Lifecycle.State.STARTED)
+        scenario.onActivity {
+            it.onWindowFocusChanged(false)
+            assertSame(original, fixture.playerView.player)
+            assertEquals(!paused, original.playWhenReady)
+        }
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        scenario.onActivity {
+            it.onWindowFocusChanged(true)
+            assertSame(original, fixture.playerView.player)
+            assertEquals(!paused, original.playWhenReady)
+            assertEquals(1, original.currentMediaItemIndex)
+            assertEquals(if (paused) View.VISIBLE else View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility)
+        }
+    }
+
+    @Test fun rotationKeepsPlaybackAndSession() = checkRotation(paused = false)
+
+    @Test fun rotationKeepsPauseAndSession() = checkRotation(paused = true)
+
+    private fun checkRotation(paused: Boolean) = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused)
+        lateinit var activity: MainActivity
+        var requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        var target = Configuration.ORIENTATION_LANDSCAPE
+        scenario.onActivity {
+            activity = it
+            requestedOrientation = it.requestedOrientation
+            if (it.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) target = Configuration.ORIENTATION_PORTRAIT
+            it.requestedOrientation = if (target == Configuration.ORIENTATION_LANDSCAPE)
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        try {
+            BrowserTestUi.waitUntil { activity.resources.configuration.orientation == target }
+            scenario.onActivity {
+                assertSame(original, fixture.playerView.player)
+                assertEquals(!paused, original.playWhenReady)
+                assertEquals(1, original.currentMediaItemIndex)
+                if (paused) assertEquals(30_000.0, original.currentPosition.toDouble(), 250.0)
+                else assertTrue(original.currentPosition >= 30_000)
+            }
+        } finally {
+            scenario.onActivity { it.requestedOrientation = requestedOrientation }
+        }
+    }
+
+    @Test fun televisionReturnFocusesResumeAndWaitsForDecision() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        lateinit var configuration: Configuration
+        var wasFocusable = false
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val wasInTouchMode = fixture.playerView.isInTouchMode
+        instrumentation.setInTouchMode(false)
+        scenario.onActivity {
+            configuration = Configuration(it.resources.configuration)
+            // The player was created in phone mode; model the focusability set by TV startup too.
+            wasFocusable = fixture.playerView.isFocusable
+            fixture.playerView.isFocusable = true
+            val tv = Configuration(configuration).apply {
+                uiMode = (uiMode and Configuration.UI_MODE_TYPE_MASK.inv()) or Configuration.UI_MODE_TYPE_TELEVISION
+            }
+            @Suppress("DEPRECATION")
+            it.resources.updateConfiguration(tv, it.resources.displayMetrics)
+        }
+        try {
+            scenario.moveToState(Lifecycle.State.CREATED)
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            scenario.onActivity {
+                assertSame(original, fixture.playerView.player)
+                assertFalse(original.playWhenReady)
+                assertTrue("TV focus=${it.currentFocus}, touch=${fixture.playerView.isInTouchMode}, uiMode=${it.resources.configuration.uiMode}",
+                    it.findViewById<View>(R.id.btn_overlay_play_pause).hasFocus())
+            }
+            keyStroke(KeyEvent.KEYCODE_DPAD_CENTER)
+            BrowserTestUi.waitUntil { original.isPlaying }
+            scenario.onActivity {
+                assertTrue(fixture.playerView.hasFocus())
+                assertEquals(View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility)
+            }
+        } finally {
+            scenario.onActivity {
+                @Suppress("DEPRECATION")
+                it.resources.updateConfiguration(configuration, it.resources.displayMetrics)
+                fixture.playerView.isFocusable = wasFocusable
+            }
+            instrumentation.setInTouchMode(wasInTouchMode)
+        }
+    }
+
+    @Test fun screenOffAndWakeRequireManualResume() = withPlayback { scenario, fixture ->
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val keyguard = context.getSystemService(KeyguardManager::class.java)
+        assumeFalse("Screen test requires a device without a PIN/password", keyguard.isKeyguardSecure)
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        val power = context.getSystemService(PowerManager::class.java)
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.adoptShellPermissionIdentity(Manifest.permission.WAKE_LOCK)
+        val wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ContinuousPlayer:D04-test")
+        try {
+            wakeLock.acquire(60_000)
+            keyStroke(KeyEvent.KEYCODE_SLEEP)
+            BrowserTestUi.waitUntil { !power.isInteractive && !original.playWhenReady }
+            var stoppedPosition = 0L
+            scenario.onActivity { stoppedPosition = original.currentPosition }
+            keyStroke(KeyEvent.KEYCODE_WAKEUP)
+            dismissTestKeyguard()
+            BrowserTestUi.waitUntil { power.isInteractive && !keyguard.isKeyguardLocked &&
+                fixture.playerView.rootView.hasWindowFocus() &&
+                fixture.playerView.rootView.findViewById<View>(R.id.pause_overlay).isShown }
+            scenario.onActivity {
+                assertSame(original, fixture.playerView.player)
+                assertFalse(original.playWhenReady)
+                assertEquals(1, original.currentMediaItemIndex)
+                assertEquals(stoppedPosition.toDouble(), original.currentPosition.toDouble(), 250.0)
+            }
+            BrowserTestUi.tap(R.string.resume_playback)
+            BrowserTestUi.waitUntil { original.isPlaying }
+        } finally {
+            try {
+                if (!power.isInteractive) keyStroke(KeyEvent.KEYCODE_WAKEUP)
+                dismissTestKeyguard()
+            } finally {
+                if (wakeLock.isHeld) wakeLock.release()
+                automation.dropShellPermissionIdentity()
+            }
+        }
+    }
+
+    private fun dismissTestKeyguard() {
+        val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("wm dismiss-keyguard")
+        ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
+    }
+
+    private fun positionAtThirty(scenario: ActivityScenario<MainActivity>, fixture: Fixture, paused: Boolean): Player {
         val original = fixture.playerView.player!!
         scenario.onActivity {
             original.seekTo(1, 30_000)
             if (paused) original.pause()
         }
         BrowserTestUi.waitUntil { original.currentMediaItemIndex == 1 && original.playbackState == Player.STATE_READY }
+        return original
+    }
+
+    private fun openSelection(scenario: ActivityScenario<MainActivity>, fixture: Fixture, paused: Boolean): Player {
+        val original = positionAtThirty(scenario, fixture, paused)
         scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_select_folder).performClick() }
         waitForTitle(fixture.directory.name)
         BrowserTestUi.waitUntil { window(fixture.directory.name)?.findViewById<ListView>(R.id.dlna_list)?.count == 3 }

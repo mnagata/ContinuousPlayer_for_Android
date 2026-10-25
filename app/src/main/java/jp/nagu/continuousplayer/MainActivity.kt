@@ -67,7 +67,6 @@ class MainActivity : AppCompatActivity() {
     private var isInBackground = false
     private var pendingUsbFolder: PlaybackFolder.Usb? = null
     private var playbackSelection: PlaybackSelection? = null
-    private var selectionRequiresManualResume = false
 
     private data class PlaybackSelection(
         val controller: PlayerController,
@@ -384,9 +383,9 @@ class MainActivity : AppCompatActivity() {
             viewModel.playbackFolder = selection.folder
             val player = selection.controller.player
             player.seekTo(selection.mediaIndex, selection.positionMs)
-            selectionRequiresManualResume = selection.interrupted || isInBackground || !accessible ||
+            val requiresManualResume = selection.interrupted || isInBackground || !accessible ||
                 player.playerError != null
-            val resume = selection.playWhenReady && !selectionRequiresManualResume
+            val resume = selection.playWhenReady && !requiresManualResume
             userPaused = !resume
             showPlayer()
             if (resume) {
@@ -542,7 +541,6 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
                 if (playWhenReady) {
-                    selectionRequiresManualResume = false
                     userPaused = false
                 } else if (!isInBackground && controller.player.playerError == null &&
                     reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
@@ -578,7 +576,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopPlayback() {
         playbackSelection = null
-        selectionRequiresManualResume = false
         userPaused = false
         playbackErrorDialog?.dismiss()
         playbackErrorDialog = null
@@ -782,6 +779,8 @@ private fun updatePortraitVideoInfo() {
         super.onStop()
         isInBackground = true
         playbackSelection?.interrupted = true
+        // A stopped activity always returns paused, with controls for explicit resumption.
+        if (playerController != null) userPaused = true
         playerController?.player?.pause()
         updatePauseOverlay()
           }
@@ -789,9 +788,6 @@ private fun updatePortraitVideoInfo() {
     override fun onStart() {
         super.onStart()
         isInBackground = false
-        if (viewModel.isPlayerScreen && playbackSelection == null && !selectionRequiresManualResume) {
-            playerController?.player?.play()
-               }
         updatePauseOverlay()
           }
 
