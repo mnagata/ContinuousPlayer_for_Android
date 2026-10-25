@@ -28,11 +28,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.doOnLayout
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -66,15 +68,19 @@ class MainActivity : AppCompatActivity() {
     private var userPaused = false
     private var isInBackground = false
     private var pendingUsbFolder: PlaybackFolder.Usb? = null
-    private var playbackSelection: PlaybackSelection? = null
+    private var playbackSelection: RetainedPlayback? = null
+    private var playbackInformation: RetainedPlayback? = null
+    private var informationDialog: AlertDialog? = null
+    private var informationJob: Job? = null
 
-    private data class PlaybackSelection(
+    private data class RetainedPlayback(
         val controller: PlayerController,
         val videos: List<VideoItem>,
         val folder: PlaybackFolder?,
         val mediaIndex: Int,
         val positionMs: Long,
         val playWhenReady: Boolean,
+        val focusedView: View?,
         var interrupted: Boolean = false,
         var restoring: Boolean = false
     )
@@ -194,7 +200,9 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (viewModel.isPlayerScreen) {
+                if (playbackInformation != null) {
+                    closeInformation()
+                } else if (viewModel.isPlayerScreen) {
                     openCurrentPlaybackSelection()
                      } else {
                     isEnabled = false
@@ -215,6 +223,22 @@ class MainActivity : AppCompatActivity() {
           }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null &&
+            event.keyCode == KeyEvent.KEYCODE_I && event.hasNoModifiers() &&
+            currentFocus?.onCheckIsTextEditor() != true
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (playbackInformation != null) closeInformation() else showInfoDialog()
+            }
+            return true
+        }
+        if (playbackInformation != null) {
+            if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) closeInformation()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if (::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null &&
             event.keyCode in listOf(KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_O) &&
             event.hasNoModifiers() && currentFocus?.onCheckIsTextEditor() != true
@@ -335,12 +359,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openPlaybackSelection(focusMedia: VideoItem?) {
-        if (playbackSelection != null) return
+        if (playbackSelection != null || playbackInformation != null) return
         val controller = playerController
         if (controller != null) {
             val player = controller.player
-            playbackSelection = PlaybackSelection(controller, viewModel.videos, viewModel.playbackFolder,
-                player.currentMediaItemIndex, player.currentPosition, player.playWhenReady)
+            playbackSelection = retainPlayback(controller)
             player.pause()
             updatePauseOverlay()
             exitImmersiveMode()
@@ -357,8 +380,22 @@ class MainActivity : AppCompatActivity() {
     private fun cancelPlaybackSelection() {
         val selection = playbackSelection ?: return
         if (selection.restoring) return
-        selection.restoring = true
         closeSelectionBrowsers()
+        restoreRetainedPlayback(selection)
+    }
+
+    private fun retainPlayback(controller: PlayerController): RetainedPlayback {
+        val player = controller.player
+        return RetainedPlayback(controller, viewModel.videos, viewModel.playbackFolder,
+            player.currentMediaItemIndex, player.currentPosition, player.playWhenReady, currentFocus)
+    }
+
+    private fun ownsRetainedPlayback(state: RetainedPlayback) =
+        playbackSelection === state || playbackInformation === state
+
+    private fun restoreRetainedPlayback(selection: RetainedPlayback) {
+        if (!ownsRetainedPlayback(selection) || selection.restoring) return
+        selection.restoring = true
         lifecycleScope.launch {
             // A retained decoder may still have cached data after storage access is lost.
             val accessible = withContext(Dispatchers.IO) {
@@ -376,9 +413,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             // Selecting another file, going home, or destroying the activity supersedes this restore.
-            if (playbackSelection !== selection || playerController !== selection.controller ||
+            if (!ownsRetainedPlayback(selection) || playerController !== selection.controller ||
                 isFinishing || isDestroyed) return@launch
-            playbackSelection = null
+            val wasInformation = playbackInformation === selection
+            if (wasInformation) playbackInformation = null else playbackSelection = null
             viewModel.videos = selection.videos
             viewModel.playbackFolder = selection.folder
             val player = selection.controller.player
@@ -393,6 +431,9 @@ class MainActivity : AppCompatActivity() {
                 if (isTelevision) playerView.requestFocus()
             } else player.pause()
             updatePauseOverlay()
+            if (wasInformation && !selection.playWhenReady && !requiresManualResume) {
+                selection.focusedView?.takeIf { it.isShown }?.requestFocus()
+            }
             if (!accessible && !isInBackground) {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle(R.string.playback_failed)
@@ -499,10 +540,11 @@ class MainActivity : AppCompatActivity() {
                 ({ error -> showPlaybackError(error) }) else null,
             onPlaybackInterrupted = {
                 playbackSelection?.interrupted = true
+                playbackInformation?.interrupted = true
                 userPaused = true
                 updatePauseOverlay()
             },
-            isPlaybackAllowed = { playbackSelection == null }
+            isPlaybackAllowed = { playbackSelection == null && playbackInformation == null }
         )
         playerController = controller
         playerView.player = controller.player
@@ -540,8 +582,8 @@ class MainActivity : AppCompatActivity() {
                    }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (playbackSelection != null) {
-                    // MediaSession can receive Play even while a file-selection window is open.
+                if (playbackSelection != null || playbackInformation != null) {
+                    // Temporary windows retain the original playback intent independently.
                     if (playWhenReady) controller.player.pause()
                     updatePauseOverlay()
                     return
@@ -582,6 +624,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopPlayback() {
         playbackSelection = null
+        playbackInformation = null
+        informationJob?.cancel()
+        informationJob = null
+        informationDialog?.setOnDismissListener(null)
+        informationDialog?.dismiss()
+        informationDialog = null
         userPaused = false
         playbackErrorDialog?.dismiss()
         playbackErrorDialog = null
@@ -632,34 +680,67 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showInfoDialog() {
-        val player = playerController?.player ?: return
+        if (isFinishing || isDestroyed || playbackInformation != null || playbackSelection != null) return
+        val controller = playerController ?: return
+        val player = controller.player
         val index = player.currentMediaItemIndex
         val video = viewModel.videos.getOrNull(index) ?: return
         val videoUri = Uri.parse(video.uri)
+        val state = retainPlayback(controller)
+        playbackInformation = state
+        player.pause()
+        updatePauseOverlay()
+        exitImmersiveMode()
 
-        lifecycleScope.launch {
+        val content = LayoutInflater.from(this).inflate(R.layout.dialog_playback_info, null)
+        content.findViewById<TextView>(R.id.info_filename).text = video.displayName
+        val audioText = content.findViewById<TextView>(R.id.info_audio).apply { visibility = View.GONE }
+        val dialog = AlertDialog.Builder(this).create()
+        informationDialog = dialog
+        dialog.setView(content, 0, 0, 0, 0)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.setOnKeyListener { _, key, event ->
+            if (key in listOf(KeyEvent.KEYCODE_I, KeyEvent.KEYCODE_ESCAPE) && event.hasNoModifiers()) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) closeInformation()
+                true
+            } else false
+        }
+        dialog.setOnDismissListener {
+            if (informationDialog === dialog) {
+                informationDialog = null
+                informationJob?.cancel()
+                informationJob = null
+                restoreRetainedPlayback(state)
+            }
+        }
+        content.findViewById<Button>(R.id.info_close).setOnClickListener { closeInformation() }
+        dialog.show()
+        if (isTelevision) content.findViewById<View>(R.id.info_close).doOnLayout {
+            if (informationDialog === dialog && dialog.isShowing) it.requestFocus()
+        }
+
+        val audio = bitPerfectAudio
+        informationJob = lifecycleScope.launch {
             val audioInfo = withContext(Dispatchers.IO) {
-                bitPerfectAudio?.getAudioOutputInfo(videoUri) ?: ""
-                   }
-            if (isFinishing || isDestroyed) return@launch
-            val content = LayoutInflater.from(this@MainActivity)
-                .inflate(R.layout.dialog_playback_info, null)
-            content.findViewById<TextView>(R.id.info_filename).text = video.displayName
-            content.findViewById<TextView>(R.id.info_audio).apply {
+                audio?.getAudioOutputInfo(videoUri) ?: ""
+            }
+            if (playbackInformation !== state || state.restoring || informationDialog !== dialog ||
+                isFinishing || isDestroyed) return@launch
+            audioText.apply {
                 text = audioInfo
                 visibility = if (audioInfo.isEmpty()) View.GONE else View.VISIBLE
             }
-            val dialog = AlertDialog.Builder(this@MainActivity).create()
-            dialog.setView(content, 0, 0, 0, 0)
-            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-            content.findViewById<Button>(R.id.info_close).setOnClickListener { dialog.dismiss() }
-            dialog.show()
-               }
-           }
+        }
+    }
+
+    private fun closeInformation() {
+        informationDialog?.dismiss()
+    }
 
     private fun updatePauseOverlay() {
         val wasVisible = pauseOverlay.visibility == View.VISIBLE
-        val show = userPaused && !isInBackground && playerController != null && playbackSelection == null
+        val show = userPaused && !isInBackground && playerController != null &&
+            playbackSelection == null && playbackInformation == null
         pauseOverlay.visibility = if (show) View.VISIBLE else View.GONE
         if (show) {
             val index = playerController?.player?.currentMediaItemIndex ?: 0
@@ -775,7 +856,7 @@ private fun updatePortraitVideoInfo() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && viewModel.isPlayerScreen && playbackSelection == null) {
+        if (hasFocus && viewModel.isPlayerScreen && playbackSelection == null && playbackInformation == null) {
             enterImmersiveMode()
                }
           }
@@ -785,6 +866,7 @@ private fun updatePortraitVideoInfo() {
         super.onStop()
         isInBackground = true
         playbackSelection?.interrupted = true
+        playbackInformation?.interrupted = true
         // A stopped activity always returns paused, with controls for explicit resumption.
         if (playerController != null) userPaused = true
         playerController?.pauseForBackground()

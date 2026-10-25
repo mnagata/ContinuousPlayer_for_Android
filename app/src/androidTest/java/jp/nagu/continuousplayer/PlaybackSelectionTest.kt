@@ -283,6 +283,7 @@ class PlaybackSelectionTest {
         BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().none {
             it.findViewById<View>(R.id.info_close) != null
         } }
+        BrowserTestUi.waitUntil { original.playWhenReady }
         scenario.onActivity {
             assertSame(original, fixture.playerView.player)
             assertFalse(browserShowing())
@@ -378,6 +379,9 @@ class PlaybackSelectionTest {
             assertFalse(original.playWhenReady)
             WindowInspector.getGlobalWindowViews().single { it.findViewById<View>(R.id.info_close) != null }
                 .findViewById<View>(R.id.info_close).performClick()
+        }
+        BrowserTestUi.waitUntil { fixture.playerView.rootView.findViewById<View>(R.id.pause_overlay).isShown }
+        scenario.onActivity {
             assertSame(original, fixture.playerView.player)
             assertFalse(original.playWhenReady)
             assertEquals(stoppedPosition.toDouble(), original.currentPosition.toDouble(), 250.0)
@@ -577,7 +581,9 @@ class PlaybackSelectionTest {
         scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_info).performClick() }
         BrowserTestUi.waitUntil { WindowInspector.getGlobalWindowViews().any { it.findViewById<View>(R.id.info_close) != null } }
         withCompetingFocus(scenario, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT) {
-            BrowserTestUi.waitUntil { !original.playWhenReady }
+            lateinit var activity: MainActivity
+            scenario.onActivity { activity = it }
+            BrowserTestUi.waitUntil { informationInterrupted(activity) }
         }
         scenario.onActivity {
             WindowInspector.getGlobalWindowViews().single { it.findViewById<View>(R.id.info_close) != null }
@@ -691,6 +697,229 @@ class PlaybackSelectionTest {
             .map { it.id }.toSet()
         assertTrue("An output route is required for this test", ids.isNotEmpty())
         return ids
+    }
+
+    @Test fun informationPausesPlaybackAndOkRestoresOriginalPosition() = checkInformationRestore(paused = false)
+
+    @Test fun informationFromPauseKeepsPauseOnOk() = checkInformationRestore(paused = true)
+
+    private fun checkInformationRestore(paused: Boolean) = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused)
+        openInformation(scenario)
+        SystemClock.sleep(250)
+        scenario.onActivity {
+            assertSame(original, fixture.playerView.player)
+            assertFalse(original.playWhenReady)
+            assertEquals(1, original.currentMediaItemIndex)
+            assertEquals(30_000.0, original.currentPosition.toDouble(), 250.0)
+            assertSame(fixture.playlist, ViewModelProvider(it)[PlayerViewModel::class.java].videos)
+            assertEquals("D01 ED.wav", informationWindow()!!.findViewById<TextView>(R.id.info_filename).text.toString())
+            assertEquals(View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility)
+        }
+        closeInformationWithOk(scenario)
+        if (paused) assertRetainedPause(scenario, fixture, original)
+        else {
+            BrowserTestUi.waitUntil { original.isPlaying }
+            scenario.onActivity { assertEquals(30_000.0, original.currentPosition.toDouble(), 1_000.0) }
+        }
+    }
+
+    @Test fun iTogglesInformationAndRestoresPlaybackWithoutOpeningList() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        keyStroke(KeyEvent.KEYCODE_I)
+        waitForInformation()
+        scenario.onActivity { assertFalse(original.playWhenReady) }
+        keyStroke(KeyEvent.KEYCODE_I)
+        BrowserTestUi.waitUntil { original.isPlaying && informationWindow() == null }
+        scenario.onActivity { assertFalse(browserShowing()); assertSame(original, fixture.playerView.player) }
+    }
+
+    @Test fun backClosesOnlyInformationAndRestoresPlayback() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        openInformation(scenario)
+        keyStroke(KeyEvent.KEYCODE_BACK)
+        BrowserTestUi.waitUntil { original.isPlaying && informationWindow() == null }
+        scenario.onActivity { assertFalse(browserShowing()) }
+    }
+
+    @Test fun infoKeyPausesBeforeDisplayingInformation() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        keyStroke(KeyEvent.KEYCODE_INFO)
+        waitForInformation()
+        scenario.onActivity { assertFalse(original.playWhenReady) }
+        closeInformationWithOk(scenario)
+        BrowserTestUi.waitUntil { original.isPlaying }
+    }
+
+    @Test fun modifiedIDoesNotOpenInformation() = withPlayback { scenario, fixture ->
+        val original = fixture.playerView.player!!
+        keyStroke(KeyEvent.KEYCODE_I, KeyEvent.META_CTRL_ON)
+        scenario.onActivity { assertNull(informationWindow()); assertTrue(original.playWhenReady) }
+    }
+
+    @Test fun iRepeatDoesNotCloseOrReopenInformation() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        val first = SystemClock.uptimeMillis()
+        keyEvent(KeyEvent.KEYCODE_I, KeyEvent.ACTION_DOWN, first)
+        waitForInformation()
+        keyEvent(KeyEvent.KEYCODE_I, KeyEvent.ACTION_DOWN, first, repeat = 1)
+        keyEvent(KeyEvent.KEYCODE_I, KeyEvent.ACTION_UP, first)
+        scenario.onActivity { assertNotNull(informationWindow()); assertFalse(original.playWhenReady) }
+        val second = SystemClock.uptimeMillis()
+        keyEvent(KeyEvent.KEYCODE_I, KeyEvent.ACTION_DOWN, second)
+        BrowserTestUi.waitUntil { original.isPlaying && informationWindow() == null }
+        keyEvent(KeyEvent.KEYCODE_I, KeyEvent.ACTION_DOWN, second, repeat = 1)
+        keyEvent(KeyEvent.KEYCODE_I, KeyEvent.ACTION_UP, second)
+        scenario.onActivity { assertNull(informationWindow()); assertFalse(browserShowing()); assertTrue(original.playWhenReady) }
+    }
+
+    @Test fun mediaPlayCannotStartBehindInformation() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        openInformation(scenario)
+        scenario.onActivity {
+            original.play()
+            original.playWhenReady = true
+            assertFalse(original.playWhenReady)
+            assertEquals(30_000.0, original.currentPosition.toDouble(), 250.0)
+        }
+        closeInformationWithOk(scenario)
+        BrowserTestUi.waitUntil { original.isPlaying }
+    }
+
+    @Test fun outputRemovalDuringInformationPreventsResumeOnClose() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        openInformation(scenario)
+        scenario.onActivity {
+            audioMonitor(it).onOutputsRemoved(currentOutputIds(it))
+            assertTrue(informationInterrupted(it))
+        }
+        closeInformationWithOk(scenario)
+        assertRetainedPause(scenario, fixture, original)
+        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_play_pause).performClick() }
+        BrowserTestUi.waitUntil { original.isPlaying }
+    }
+
+    @Test fun lostLocalFileDuringInformationIsNotResumedFromCache() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        openInformation(scenario)
+        assertTrue(fixture.files[1].delete())
+        closeInformationWithOk(scenario)
+        waitForTitle(R.string.playback_source_unavailable)
+        scenario.onActivity {
+            assertFalse(original.playWhenReady)
+            assertSame(original, fixture.playerView.player)
+            assertEquals(30_000.0, original.currentPosition.toDouble(), 250.0)
+        }
+    }
+
+    @Test fun closingInformationImmediatelyCannotReopenFromLateResult() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        scenario.onActivity {
+            it.findViewById<View>(R.id.btn_overlay_info).performClick()
+            assertFalse(original.playWhenReady)
+            assertEquals(1, WindowInspector.getGlobalWindowViews().count { window -> window.findViewById<View>(R.id.info_close) != null })
+            informationWindow()!!.findViewById<View>(R.id.info_close).performClick()
+        }
+        BrowserTestUi.waitUntil { original.isPlaying }
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        scenario.onActivity { assertNull(informationWindow()); assertFalse(browserShowing()) }
+    }
+
+    @Test fun endingSessionDuringInformationLoadDiscardsRestoration() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        scenario.onActivity {
+            it.findViewById<View>(R.id.btn_overlay_info).performClick()
+            it.findViewById<View>(R.id.btn_overlay_home).performClick()
+        }
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        scenario.onActivity {
+            assertNull(informationWindow())
+            assertNull(fixture.playerView.player)
+            assertFalse(ViewModelProvider(it)[PlayerViewModel::class.java].isPlayerScreen)
+            assertEquals(View.VISIBLE, it.findViewById<View>(R.id.folder_select_container).visibility)
+            original.play() // A stale handle to the released controller must remain inert.
+            assertNull(fixture.playerView.player)
+        }
+    }
+
+    @Test fun televisionInformationReturnsFocusToPausedInfoButton() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = true)
+        lateinit var configuration: Configuration
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val wasInTouchMode = fixture.playerView.isInTouchMode
+        instrumentation.setInTouchMode(false)
+        scenario.onActivity {
+            configuration = Configuration(it.resources.configuration)
+            val tv = Configuration(configuration).apply {
+                uiMode = (uiMode and Configuration.UI_MODE_TYPE_MASK.inv()) or Configuration.UI_MODE_TYPE_TELEVISION
+            }
+            @Suppress("DEPRECATION")
+            it.resources.updateConfiguration(tv, it.resources.displayMetrics)
+            it.findViewById<View>(R.id.btn_overlay_info).requestFocus()
+            it.findViewById<View>(R.id.btn_overlay_info).performClick()
+        }
+        try {
+            waitForInformation()
+            scenario.onActivity {
+                val window = informationWindow()!!
+                assertTrue("Info focus=${window.findFocus()}, touch=${window.isInTouchMode}, uiMode=${it.resources.configuration.uiMode}",
+                    window.findViewById<View>(R.id.info_close).hasFocus())
+            }
+            keyStroke(KeyEvent.KEYCODE_DPAD_CENTER)
+            assertRetainedPause(scenario, fixture, original)
+            scenario.onActivity { assertTrue(it.findViewById<View>(R.id.btn_overlay_info).hasFocus()) }
+        } finally {
+            scenario.onActivity {
+                @Suppress("DEPRECATION")
+                it.resources.updateConfiguration(configuration, it.resources.displayMetrics)
+            }
+            instrumentation.setInTouchMode(wasInTouchMode)
+        }
+    }
+
+    @Test fun rotationDuringInformationKeepsSnapshotUntilClose() = withPlayback { scenario, fixture ->
+        val original = positionAtThirty(scenario, fixture, paused = false)
+        openInformation(scenario)
+        lateinit var activity: MainActivity
+        var requested = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        var target = Configuration.ORIENTATION_LANDSCAPE
+        scenario.onActivity {
+            activity = it
+            requested = it.requestedOrientation
+            if (it.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) target = Configuration.ORIENTATION_PORTRAIT
+            it.requestedOrientation = if (target == Configuration.ORIENTATION_LANDSCAPE)
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        try {
+            BrowserTestUi.waitUntil { activity.resources.configuration.orientation == target }
+            scenario.onActivity { assertSame(original, fixture.playerView.player); assertFalse(original.playWhenReady) }
+            closeInformationWithOk(scenario)
+            BrowserTestUi.waitUntil { original.isPlaying }
+            scenario.onActivity { assertEquals(30_000.0, original.currentPosition.toDouble(), 1_000.0) }
+        } finally {
+            scenario.onActivity { it.requestedOrientation = requested }
+        }
+    }
+
+    private fun informationWindow() = WindowInspector.getGlobalWindowViews().singleOrNull {
+        it.findViewById<View>(R.id.info_close) != null
+    }
+
+    private fun waitForInformation() = BrowserTestUi.waitUntil { informationWindow()?.hasWindowFocus() == true }
+
+    private fun openInformation(scenario: ActivityScenario<MainActivity>) {
+        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_info).performClick() }
+        waitForInformation()
+    }
+
+    private fun closeInformationWithOk(scenario: ActivityScenario<MainActivity>) {
+        scenario.onActivity { informationWindow()!!.findViewById<View>(R.id.info_close).performClick() }
+        BrowserTestUi.waitUntil { informationWindow() == null }
+    }
+
+    private fun informationInterrupted(activity: MainActivity): Boolean {
+        val state = MainActivity::class.java.getDeclaredField("playbackInformation").apply { isAccessible = true }.get(activity)
+        return state != null && state.javaClass.getDeclaredField("interrupted").apply { isAccessible = true }.getBoolean(state)
     }
 
     private fun positionAtThirty(scenario: ActivityScenario<MainActivity>, fixture: Fixture, paused: Boolean): Player {
