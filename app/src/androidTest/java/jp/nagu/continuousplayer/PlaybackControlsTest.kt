@@ -30,7 +30,7 @@ import java.nio.ByteOrder
 @RunWith(AndroidJUnit4::class)
 class PlaybackControlsTest {
     private val navigation = listOf(R.id.btn_overlay_home, R.id.btn_overlay_select_folder,
-        R.id.btn_overlay_info, R.id.btn_overlay_exit)
+        R.id.btn_overlay_info)
     private val transport = listOf(R.id.btn_overlay_previous, R.id.btn_overlay_rewind,
         R.id.btn_overlay_play_pause, R.id.btn_overlay_forward, R.id.btn_overlay_next)
 
@@ -205,6 +205,43 @@ class PlaybackControlsTest {
             assertTrue(it.findViewById<View>(R.id.btn_overlay_forward).isEnabled)
             assertFalse(fixture.player.playWhenReady)
         }
+    }
+
+    @Test fun playbackNavigationUsesCommonNamesWithoutExit() = withPlayback { scenario, fixture ->
+        scenario.onActivity {
+            val expected = listOf("ホームに戻る", "ファイル一覧", "メディア情報")
+            assertEquals(3, it.findViewById<android.view.ViewGroup>(R.id.player_navigation_controls).childCount)
+            navigation.zip(expected).forEach { (id, label) ->
+                val button = it.findViewById<View>(id)
+                assertEquals(label, button.createAccessibilityNodeInfo().contentDescription.toString())
+                assertEquals(label, button.tooltipText.toString())
+            }
+            assertEquals("再生", it.findViewById<View>(R.id.btn_overlay_play_pause).contentDescription.toString())
+            it.findViewById<View>(R.id.btn_home_more).performClick() // A stale hidden-home action is inert.
+            assertFalse(it.isFinishing)
+            assertSame(fixture.player, fixture.playerView.player)
+        }
+    }
+
+    @Test fun informationUsesCommonTitleWithoutPlayingStatus() = withPlayback { scenario, fixture ->
+        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_info).performClick() }
+        BrowserTestUi.waitUntil { android.view.inspector.WindowInspector.getGlobalWindowViews().any { it.findViewById<View>(R.id.info_close) != null } }
+        scenario.onActivity {
+            val window = android.view.inspector.WindowInspector.getGlobalWindowViews().single { it.findViewById<View>(R.id.info_close) != null }
+            fun texts(view: View): List<String> = (if (view is TextView) listOf(view.text.toString()) else emptyList()) +
+                (if (view is android.view.ViewGroup) (0 until view.childCount).flatMap { index -> texts(view.getChildAt(index)) } else emptyList())
+            assertEquals(1, texts(window).count { it == "メディア情報" })
+            assertFalse(texts(window).contains("再生中"))
+            assertFalse(fixture.player.playWhenReady)
+        }
+        saveScreenshot(fixture, "media-info")
+        scenario.onActivity {
+            val window = android.view.inspector.WindowInspector.getGlobalWindowViews().single { it.findViewById<View>(R.id.info_close) != null }
+            val close = window.findViewById<View>(R.id.info_close)
+            assertEquals("Information close button is clipped", close.height, bounds(close).height())
+        }
+        BrowserTestUi.tap(android.R.string.ok)
+        BrowserTestUi.waitUntil { fixture.playerView.rootView.findViewById<View>(R.id.pause_overlay).isShown }
     }
 
     private fun assertControlBounds(activity: MainActivity) {

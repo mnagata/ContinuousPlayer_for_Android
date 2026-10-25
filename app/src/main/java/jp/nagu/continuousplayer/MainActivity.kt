@@ -25,6 +25,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
 import androidx.core.view.WindowCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -74,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private var playbackInformation: RetainedPlayback? = null
     private var informationDialog: AlertDialog? = null
     private var informationJob: Job? = null
+    private var homeMenu: PopupMenu? = null
 
     private data class RetainedPlayback(
         val controller: PlayerController,
@@ -178,9 +180,7 @@ class MainActivity : AppCompatActivity() {
             launchPicker()
               }
 
-        findViewById<Button>(R.id.btn_exit).setOnClickListener {
-            finishAndRemoveTask()
-              }
+        findViewById<Button>(R.id.btn_home_more).setOnClickListener { showHomeMenu() }
 
         findViewById<ImageButton>(R.id.btn_overlay_home).setOnClickListener {
             closeSelectionBrowsers()
@@ -217,12 +217,6 @@ class MainActivity : AppCompatActivity() {
             openCurrentPlaybackSelection()
               }
 
-        findViewById<ImageButton>(R.id.btn_overlay_exit).setOnClickListener {
-            closeSelectionBrowsers()
-            stopPlayback()
-            finishAndRemoveTask()
-              }
-
         if (isTelevision) {
             findViewById<TextView>(R.id.tv_controls_hint).visibility = View.VISIBLE
             selectFolderButton.requestFocus()
@@ -230,7 +224,9 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (playbackInformation != null) {
+                if (homeMenu != null) {
+                    homeMenu?.dismiss()
+                } else if (playbackInformation != null) {
                     closeInformation()
                 } else if (viewModel.isPlayerScreen) {
                     openCurrentPlaybackSelection()
@@ -498,7 +494,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle(R.string.saved_folder_local)
                 .setMessage(R.string.saf_picker_unavailable)
-                .setNegativeButton(android.R.string.cancel, null)
+                .setNegativeButton(R.string.file_browser_cancel, null)
                 .setPositiveButton(R.string.usb_choose_drive) { _, _ -> launchUsbPicker() }
                 .show()
         }
@@ -522,7 +518,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle(R.string.usb_permission_title)
             .setMessage(R.string.usb_permission_message)
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(R.string.file_browser_cancel, null)
             .setPositiveButton(R.string.usb_open_settings) { _, _ ->
                 val intents = listOf(
                     Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
@@ -713,7 +709,7 @@ class MainActivity : AppCompatActivity() {
                 showFolderSelect()
                 launchPlaybackFolder()
             }
-            .setNeutralButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.file_browser_cancel, null)
             .show()
     }
 
@@ -885,10 +881,31 @@ private fun updatePortraitVideoInfo() {
 
     private fun showPlayer() {
         viewModel.isPlayerScreen = true
+        homeMenu?.dismiss()
         folderSelectContainer.visibility = View.GONE
         playerContainer.visibility = View.VISIBLE
         enterImmersiveMode()
           }
+
+    private fun showHomeMenu() {
+        if (viewModel.isPlayerScreen || isFinishing || isDestroyed) return
+        homeMenu?.dismiss()
+        val anchor = findViewById<Button>(R.id.btn_home_more)
+        val menu = PopupMenu(this, anchor)
+        homeMenu = menu
+        menu.inflate(R.menu.home_more)
+        menu.setOnMenuItemClickListener { item ->
+            if (item.itemId == R.id.action_exit_app && !viewModel.isPlayerScreen) {
+                finishAndRemoveTask()
+                true
+            } else false
+        }
+        menu.setOnDismissListener {
+            if (homeMenu === menu) homeMenu = null
+            if (!viewModel.isPlayerScreen && !isFinishing && !isDestroyed) anchor.requestFocus()
+        }
+        menu.show()
+    }
 
     private fun showFolderSelect() {
         viewModel.isPlayerScreen = false
@@ -918,6 +935,7 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onStop() {
+        homeMenu?.dismiss()
         lastPlaybackFolder.save(viewModel.playbackFolder)
         super.onStop()
         isInBackground = true

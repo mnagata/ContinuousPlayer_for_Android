@@ -22,6 +22,41 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class DlnaSelectionDialogTest {
+    @Test fun registrationUsesCommonNameAndFitsItsButton() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            var registered = 0
+            scenario.onActivity {
+                dialog = DlnaSelectionDialog(it, fixtureContent().copy(onRegister = { registered++ }))
+                dialog.show()
+            }
+            for ((orientation, config) in listOf(
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT to Configuration.ORIENTATION_PORTRAIT,
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE to Configuration.ORIENTATION_LANDSCAPE
+            )) {
+                scenario.onActivity { it.requestedOrientation = orientation }
+                awaitOrientation(scenario, config)
+                scenario.onActivity { dialog.refreshForConfiguration() }
+                idle()
+                scenario.onActivity {
+                    val button = dialog.findViewById<android.widget.Button>(R.id.dlna_register)
+                    assertEquals("このフォルダーを登録", button.text.toString())
+                    assertEquals(button.text.toString(), it.getString(R.string.usb_use_folder))
+                    assertTrue(button.layout.height <= button.height - button.compoundPaddingTop - button.compoundPaddingBottom)
+                    val cancel = dialog.findViewById<android.widget.Button>(R.id.dlna_close)
+                    assertTrue("Cancel label is clipped", cancel.layout.height <= cancel.height - cancel.compoundPaddingTop - cancel.compoundPaddingBottom)
+                    button.performClick()
+                    assertNull(it.findViewById<androidx.media3.ui.PlayerView>(R.id.player_view).player)
+                }
+                SystemClock.sleep(600)
+                val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration
+                screenshot("d08-register-${resources.screenWidthDp}dp-font${resources.fontScale}.png")
+            }
+            assertEquals(2, registered)
+            scenario.onActivity { dialog.dismiss() }
+        }
+    }
+
     @Test
     fun horizontalKeysPageFilesAndKeepSelectionVisibleAcrossOrientations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -192,7 +227,7 @@ class DlnaSelectionDialogTest {
                     val up = dialog.findViewById<android.widget.Button>(R.id.dlna_up)
                     assertEquals("", up.text.toString())
                     assertNotNull(up.compoundDrawablesRelative[0])
-                    assertEquals("↑ 保存済みフォルダーへ", up.contentDescription.toString())
+                    assertEquals("保存済みフォルダー", up.contentDescription.toString())
                     assertEquals(6, dialog.findViewById<ListView>(R.id.dlna_list).count)
                 }
                 idle()

@@ -15,7 +15,7 @@
 
     <LinearLayout android:id="@+id/dlna_top_actions" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical">
-        <Button android:id="@+id/dlna_up" android:layout_width="match_parent" android:layout_height="48dp"
+        <Button android:id="@+id/dlna_up" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp"
             android:minWidth="48dp" android:padding="0dp" android:text="@string/usb_parent" android:textAllCaps="false"
             android:textColor="#FFFFFF" android:textSize="14sp" android:background="@drawable/home_secondary_button"
             android:backgroundTint="@null" android:nextFocusDown="@id/dlna_list" android:visibility="gone" />
@@ -41,16 +41,17 @@
         android:textColor="#9BAFC9" android:textSize="12sp" android:visibility="gone" />
     <LinearLayout android:id="@+id/dlna_bottom_actions" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="8dp" android:orientation="horizontal">
-        <Button android:id="@+id/dlna_register" android:layout_width="0dp" android:layout_height="48dp"
+        <Button android:id="@+id/dlna_register" android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="48dp"
+            android:paddingVertical="8dp"
             android:layout_weight="1" android:layout_marginEnd="12dp" android:visibility="gone"
             android:text="@string/folder_register" android:textAllCaps="false" android:textSize="14sp"
             android:textColor="#FFFFFF" android:background="@drawable/home_secondary_button" android:backgroundTint="@null"
             android:nextFocusUp="@id/dlna_list" />
-        <Button android:id="@+id/dlna_refresh" android:layout_width="0dp" android:layout_height="48dp"
+        <Button android:id="@+id/dlna_refresh" android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="48dp"
             android:layout_weight="1" android:text="@string/usb_refresh" android:textAllCaps="false"
             android:textColor="#FFFFFF" android:background="@drawable/home_secondary_button" android:backgroundTint="@null"
             android:nextFocusUp="@id/dlna_list" android:nextFocusRight="@id/dlna_close" />
-        <Button android:id="@+id/dlna_close" android:layout_width="0dp" android:layout_height="48dp"
+        <Button android:id="@+id/dlna_close" android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="48dp"
             android:layout_weight="1" android:layout_marginStart="12dp" android:text="@string/dlna_close" android:textAllCaps="false"
             android:textColor="#FFFFFF" android:background="@drawable/home_secondary_button" android:backgroundTint="@null"
             android:nextFocusUp="@id/dlna_list" android:nextFocusLeft="@id/dlna_refresh" />

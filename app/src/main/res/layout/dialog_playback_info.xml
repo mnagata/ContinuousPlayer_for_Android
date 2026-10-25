@@ -9,23 +9,16 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/playback_info_label"
-        android:textColor="#66DFFF"
-        android:textSize="12sp"
-        android:letterSpacing="0.12" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
         android:text="@string/info"
         android:textColor="#FFFFFF"
         android:textSize="24sp"
         android:fontFamily="sans-serif-medium" />
 
+    <!-- Wrap short content; weight lets long content shrink while keeping OK visible. -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_weight="1"
         android:layout_marginTop="12dp"
         android:fillViewport="true">
 

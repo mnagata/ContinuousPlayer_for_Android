@@ -53,7 +53,11 @@ internal object BrowserTestUi {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val down = SystemClock.uptimeMillis()
         for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
-            if (action == MotionEvent.ACTION_UP && longPress) SystemClock.sleep(ViewConfiguration.getLongPressTimeout().toLong() + 150)
+            if (action == MotionEvent.ACTION_UP && longPress) {
+                SystemClock.sleep(ViewConfiguration.getLongPressTimeout().toLong() + 150)
+                // Let the queued long-click callback finish before releasing under emulator load.
+                InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            }
             val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
                 bounds.exactCenterX(), bounds.exactCenterY(), 0)
             event.source = InputDevice.SOURCE_TOUCHSCREEN

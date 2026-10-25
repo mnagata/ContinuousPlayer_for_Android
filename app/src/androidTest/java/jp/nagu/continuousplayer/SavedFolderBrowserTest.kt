@@ -320,13 +320,15 @@ class SavedFolderBrowserTest {
 
     @Test fun longPressCanRemoveAnUnavailableDlnaFolderWithoutConnecting() = withFixture { scenario, folder ->
         lateinit var browser: SafFileBrowser
+        var connectionRequests = 0
         scenario.onActivity {
-            browser = SafFileBrowser(it, onAddFolder = {}, onAddDlna = { fail("Unexpected DLNA discovery") }, onDlnaFolder = { fail("Unexpected connection") },
+            browser = SafFileBrowser(it, onAddFolder = {}, onAddDlna = { fail("Unexpected DLNA discovery") }, onDlnaFolder = { connectionRequests++ },
                 onSelected = { _, _ -> fail("Unexpected local media") })
             browser.openSavedFolders()
         }
         waitForFolder(folder.title)
         BrowserTestUi.tap(folder.title, longPress = true)
+        scenario.onActivity { assertEquals("Long press must not request a connection", 0, connectionRequests) }
         BrowserTestUi.tap(R.string.folder_unregister)
         BrowserTestUi.waitUntil { !SavedDlnaFolders(InstrumentationRegistry.getInstrumentation().targetContext)
             .contains(folder.serverId, folder.folderId) }

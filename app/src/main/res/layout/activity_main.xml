@@ -11,7 +11,8 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@drawable/home_background"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:accessibilityPaneTitle="@string/home_title">
 
         <ScrollView
             android:layout_width="match_parent"
@@ -35,7 +36,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/home_eyebrow"
+                    android:text="@string/home_title"
                     android:textColor="#66DFFF"
                     android:textSize="12sp"
                     android:letterSpacing="0.18" />
@@ -50,14 +51,18 @@
                     android:fontFamily="sans-serif-medium"
                     android:maxLines="1"
                     android:autoSizeTextType="uniform"
-                    android:autoSizeMinTextSize="20sp"
+                    android:autoSizeMinTextSize="12sp"
                     android:autoSizeMaxTextSize="32sp"
                     android:autoSizeStepGranularity="1sp" />
 
                 <Button
                     android:id="@+id/btn_select_folder"
-                    android:layout_width="280dp"
-                    android:layout_height="56dp"
+                    android:layout_width="wrap_content"
+                    android:minWidth="280dp"
+                    android:maxWidth="280dp"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
+                    android:paddingVertical="8dp"
                     android:layout_marginTop="28dp"
                     android:background="@drawable/home_primary_button"
                     android:backgroundTint="@null"
@@ -66,17 +71,22 @@
                     android:textAllCaps="false"
                     android:textColor="#FFFFFF"
                     android:textSize="17sp"
-                    android:nextFocusDown="@id/btn_exit" />
+                    android:nextFocusDown="@id/btn_home_more" />
 
                 <Button
-                    android:id="@+id/btn_exit"
-                    android:layout_width="280dp"
-                    android:layout_height="48dp"
+                    android:id="@+id/btn_home_more"
+                    android:layout_width="wrap_content"
+                    android:minWidth="280dp"
+                    android:maxWidth="280dp"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:paddingVertical="8dp"
                     android:layout_marginTop="10dp"
                     android:background="@drawable/home_secondary_button"
                     android:backgroundTint="@null"
                     app:backgroundTint="@null"
-                    android:text="@string/exit_app"
+                    android:text="@string/home_more"
+                    android:tooltipText="@string/home_more"
                     android:textAllCaps="false"
                     android:textColor="#CED4ED"
                     android:nextFocusUp="@id/btn_select_folder" />
@@ -139,7 +149,7 @@
                     android:contentDescription="@string/return_to_home"
                     android:tooltipText="@string/return_to_home"
                     android:src="@drawable/ic_home"
-                    android:nextFocusLeft="@id/btn_overlay_exit"
+                    android:nextFocusLeft="@id/btn_overlay_info"
                     android:nextFocusRight="@id/btn_overlay_select_folder"
                     android:nextFocusUp="@id/btn_overlay_play_pause"
                     android:nextFocusDown="@id/btn_overlay_play_pause"
@@ -162,21 +172,6 @@
                     android:tooltipText="@string/info"
                     android:src="@drawable/ic_info"
                     android:nextFocusLeft="@id/btn_overlay_select_folder"
-                    android:nextFocusRight="@id/btn_overlay_exit"
-                    android:nextFocusUp="@id/btn_overlay_play_pause"
-                    android:nextFocusDown="@id/btn_overlay_play_pause"
-                    android:nextFocusForward="@id/btn_overlay_exit" />
-                 <Space
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-                 <ImageButton
-                    android:id="@+id/btn_overlay_exit"
-                    style="@style/PlayerControlButton"
-                    android:contentDescription="@string/exit_app"
-                    android:tooltipText="@string/exit_app"
-                    android:src="@drawable/ic_close"
-                    android:nextFocusLeft="@id/btn_overlay_info"
                     android:nextFocusRight="@id/btn_overlay_home"
                     android:nextFocusUp="@id/btn_overlay_play_pause"
                     android:nextFocusDown="@id/btn_overlay_play_pause"
