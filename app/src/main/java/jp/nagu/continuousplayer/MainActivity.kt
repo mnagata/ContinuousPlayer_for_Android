@@ -68,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dlnaBrowser: DlnaBrowser
     private lateinit var safBrowser: SafFileBrowser
     private var playbackErrorDialog: AlertDialog? = null
+    private val playbackModalDialogs = mutableSetOf<AlertDialog>()
     private var userPaused = false
     private var isInBackground = false
     private var pendingUsbFolder: PlaybackFolder.Usb? = null
@@ -174,6 +175,9 @@ class MainActivity : AppCompatActivity() {
         overlayFilename = findViewById(R.id.overlay_filename)
         portraitVideoInfo = findViewById(R.id.portrait_video_info)
 
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, _ ->
+            updateExternalPlaybackCommands()
+        }
         selectFolderButton = findViewById(R.id.btn_select_folder)
         overlayPlayPauseButton = findViewById(R.id.btn_overlay_play_pause)
 
@@ -252,8 +256,9 @@ class MainActivity : AppCompatActivity() {
             if (event.action == KeyEvent.ACTION_UP) playbackKeyPresses.remove(key)
             return true
         }
-        if (!::viewModel.isInitialized || !viewModel.isPlayerScreen || playbackSelection != null ||
-            playbackInformation != null || currentFocus?.onCheckIsTextEditor() == true ||
+        if (playerController != null && isPlaybackInputBlocked() && PlaybackInput.isMediaTransportKey(event.keyCode)) return true
+        if (!::viewModel.isInitialized || !viewModel.isPlayerScreen || isPlaybackInputBlocked() ||
+            currentFocus?.onCheckIsTextEditor() == true ||
             !window.decorView.hasWindowFocus()
         ) return super.dispatchKeyEvent(event)
 
@@ -408,7 +413,7 @@ class MainActivity : AppCompatActivity() {
                     .setTitle(R.string.playback_failed)
                     .setMessage(R.string.playback_source_unavailable)
                     .setPositiveButton(android.R.string.ok, null)
-                    .show()
+                    .showPlaybackModal()
             }
         }
     }
@@ -439,7 +444,7 @@ class MainActivity : AppCompatActivity() {
                 .setMessage(R.string.saf_picker_unavailable)
                 .setNegativeButton(R.string.file_browser_cancel, null)
                 .setPositiveButton(R.string.usb_choose_drive) { _, _ -> launchUsbPicker() }
-                .show()
+                .showPlaybackModal()
         }
     }
 
@@ -483,9 +488,9 @@ class MainActivity : AppCompatActivity() {
                 if (!launched) {
                     AlertDialog.Builder(this)
                         .setMessage(R.string.usb_settings_unavailable)
-                        .setPositiveButton(android.R.string.ok, null).show()
+                        .setPositiveButton(android.R.string.ok, null).showPlaybackModal()
                 }
-            }.show()
+            }.showPlaybackModal()
     }
 
     private fun onTreeSelected(treeUri: Uri) {
@@ -513,9 +518,11 @@ class MainActivity : AppCompatActivity() {
                 userPaused = true
                 updatePauseOverlay()
             },
-            isPlaybackAllowed = { playbackSelection == null && playbackInformation == null }
+            isPlaybackAllowed = { playbackSelection == null && playbackInformation == null },
+            isExternalInputAllowed = { !isPlaybackInputBlocked() }
         )
         playerController = controller
+        updateExternalPlaybackCommands()
         playerView.player = controller.player
 
         val bitPerfect = BitPerfectAudioManager(this)
@@ -592,7 +599,7 @@ class MainActivity : AppCompatActivity() {
         )
         gestureDetector = GestureDetector(this, handler)
         touchOverlay.setOnTouchListener { _, event ->
-            if (playbackSelection == null) gestureDetector?.onTouchEvent(event)
+            if (!isPlaybackInputBlocked()) gestureDetector?.onTouchEvent(event)
             true
                }
 
@@ -608,7 +615,7 @@ class MainActivity : AppCompatActivity() {
         informationDialog?.dismiss()
         informationDialog = null
         userPaused = false
-        playbackErrorDialog?.dismiss()
+        playbackModalDialogs.toList().forEach { it.dismiss() }
         playbackErrorDialog = null
         playerView.keepScreenOn = false
         pauseOverlay.visibility = View.GONE
@@ -653,7 +660,21 @@ class MainActivity : AppCompatActivity() {
                 launchPlaybackFolder()
             }
             .setNeutralButton(R.string.file_browser_cancel, null)
-            .show()
+            .showPlaybackModal()
+    }
+
+    private fun AlertDialog.Builder.showPlaybackModal(): AlertDialog {
+        val dialog = create()
+        playbackModalDialogs.add(dialog)
+        dialog.setOnKeyListener { _, key, _ -> PlaybackInput.isMediaTransportKey(key) }
+        dialog.setOnDismissListener {
+            playbackModalDialogs.remove(dialog)
+            updateExternalPlaybackCommands()
+        }
+        // Block before attaching the window; focus loss arrives on a later UI dispatch.
+        updateExternalPlaybackCommands()
+        dialog.show()
+        return dialog
     }
 
     private fun showInfoDialog() {
@@ -677,7 +698,9 @@ class MainActivity : AppCompatActivity() {
         dialog.setView(content, 0, 0, 0, 0)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
         dialog.setOnKeyListener { _, key, event ->
-            if (key in listOf(KeyEvent.KEYCODE_I, KeyEvent.KEYCODE_ESCAPE) && event.hasNoModifiers()) {
+            if (PlaybackInput.isMediaTransportKey(key)) true
+            else if (dialog.currentFocus?.onCheckIsTextEditor() == true) false
+            else if (key in listOf(KeyEvent.KEYCODE_I, KeyEvent.KEYCODE_ESCAPE) && event.hasNoModifiers()) {
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) closeInformation()
                 true
             } else false
@@ -714,7 +737,16 @@ class MainActivity : AppCompatActivity() {
         informationDialog?.dismiss()
     }
 
+    private fun isPlaybackInputBlocked(): Boolean =
+        playbackSelection != null || playbackInformation != null || playbackModalDialogs.isNotEmpty() ||
+            (!isInBackground && (!window.decorView.hasWindowFocus() || currentFocus?.onCheckIsTextEditor() == true))
+
+    private fun updateExternalPlaybackCommands() {
+        playerController?.setExternalCommandsBlocked(isPlaybackInputBlocked())
+    }
+
     private fun updatePauseOverlay() {
+        updateExternalPlaybackCommands()
         val wasVisible = pauseOverlay.visibility == View.VISIBLE
         val show = userPaused && !isInBackground && playerController != null &&
             playbackSelection == null && playbackInformation == null
@@ -872,7 +904,8 @@ private fun updatePortraitVideoInfo() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && viewModel.isPlayerScreen && playbackSelection == null && playbackInformation == null) {
+        updateExternalPlaybackCommands()
+        if (hasFocus && ::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null && playbackInformation == null) {
             enterImmersiveMode()
                }
           }

@@ -93,6 +93,7 @@ internal class DlnaSelectionDialog(
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (PlaybackInput.isMediaTransportKey(event.keyCode)) return true
         if (currentFocus?.onCheckIsTextEditor() == true) return super.dispatchKeyEvent(event)
         if (event.keyCode == KeyEvent.KEYCODE_DEL && event.hasNoModifiers()) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) navigateUpOrCancel()

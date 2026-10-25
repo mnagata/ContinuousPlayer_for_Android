@@ -1,6 +1,7 @@
 package jp.nagu.continuousplayer
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
@@ -16,6 +17,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommands
 
 /**
  * ExoPlayerをラップし、プレイリスト再生・シーク・前後スキップを提供するコントローラ。
@@ -30,7 +32,8 @@ class PlayerController(
     context: Context,
     private val onPlaybackFailure: ((PlaybackException) -> Unit)? = null,
     private val onPlaybackInterrupted: (() -> Unit)? = null,
-    private val isPlaybackAllowed: () -> Boolean = { true }
+    private val isPlaybackAllowed: () -> Boolean = { true },
+    private val isExternalInputAllowed: () -> Boolean = { true }
 ) {
 
     companion object {
@@ -74,7 +77,40 @@ class PlayerController(
     val videoFormat get() = engine.videoFormat
     val audioFormat get() = engine.audioFormat
 
-    private val mediaSession: MediaSession = MediaSession.Builder(context, player).build()
+    private var externalCommandsBlocked = false
+    private val modalPlayerCommands = Player.Commands.Builder().addAll(
+        Player.COMMAND_GET_CURRENT_MEDIA_ITEM, Player.COMMAND_GET_TIMELINE, Player.COMMAND_GET_METADATA,
+        Player.COMMAND_GET_AUDIO_ATTRIBUTES, Player.COMMAND_GET_VOLUME, Player.COMMAND_GET_DEVICE_VOLUME,
+        Player.COMMAND_GET_TEXT, Player.COMMAND_GET_TRACKS, Player.COMMAND_SET_VOLUME,
+        Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS, Player.COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS
+    ).build()
+
+    private fun externalPlayerCommands() = if (externalCommandsBlocked) modalPlayerCommands
+        else MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
+
+    private fun externalSessionCommands() = if (externalCommandsBlocked) SessionCommands.EMPTY
+        else MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
+
+    private val mediaSession: MediaSession = MediaSession.Builder(context, player)
+        .setCallback(object : MediaSession.Callback {
+            override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo) =
+                MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailablePlayerCommands(externalPlayerCommands())
+                    .setAvailableSessionCommands(externalSessionCommands())
+                    .build()
+
+            override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo,
+                intent: Intent): Boolean = externalCommandsBlocked || !isExternalInputAllowed()
+        }).build()
+
+    /** Media3 applies these permissions immediately, including to platform/legacy controllers. */
+    fun setExternalCommandsBlocked(blocked: Boolean) {
+        if (externalCommandsBlocked == blocked) return
+        externalCommandsBlocked = blocked
+        mediaSession.connectedControllers.forEach { controller ->
+            mediaSession.setAvailableCommands(controller, externalSessionCommands(), externalPlayerCommands())
+        }
+    }
 
     private var errorCount = 0
 
@@ -125,12 +161,14 @@ class PlayerController(
 
         /** 再生中ならポーズ、ポーズ中なら再生を再開する。 */
     fun togglePlayPause() {
+        if (!isExternalInputAllowed()) return
         // Playback intent stays true while buffering or switching media items.
         if (player.playWhenReady) player.pause() else player.play()
         }
 
         /** 指定ミリ秒だけ前方にシークする。末尾を超える場合は次の動画へスキップする。 */
     fun seekForward(ms: Long = 10_000L) {
+        if (!isExternalInputAllowed()) return
         val duration = player.duration
         if (duration != C.TIME_UNSET && player.currentPosition + ms >= duration) {
             if (player.hasNextMediaItem()) {
@@ -143,11 +181,13 @@ class PlayerController(
 
         /** 指定ミリ秒だけ後方にシークする（0未満にはならない）。 */
     fun seekBackward(ms: Long = 10_000L) {
+        if (!isExternalInputAllowed()) return
         player.seekTo((player.currentPosition - ms).coerceAtLeast(0))
         }
 
         /** プレイリストの次の動画へスキップする。次が無い場合は何もしない。 */
     fun nextVideo() {
+        if (!isExternalInputAllowed()) return
         Log.d(TAG, "nextVideo: current=${player.currentMediaItemIndex}, count=${player.mediaItemCount}, hasNext=${player.hasNextMediaItem()}")
         if (player.hasNextMediaItem()) {
             player.seekToNextMediaItem()
@@ -156,6 +196,7 @@ class PlayerController(
 
         /** プレイリストの前の動画へスキップする。前が無い場合は何もしない。 */
     fun previousVideo() {
+        if (!isExternalInputAllowed()) return
         Log.d(TAG, "previousVideo: current=${player.currentMediaItemIndex}, count=${player.mediaItemCount}, hasPrev=${player.hasPreviousMediaItem()}")
         if (player.hasPreviousMediaItem()) {
             player.seekToPreviousMediaItem()

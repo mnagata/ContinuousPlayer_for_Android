@@ -384,7 +384,8 @@ class PlaybackSelectionTest {
                 assertEquals(fixture.folder, model.playbackFolder)
             }
         }
-        scenario.onActivity { it.findViewById<ImageButton>(R.id.btn_overlay_play_pause).performClick() }
+        BrowserTestUi.waitUntil { fixture.playerView.rootView.hasWindowFocus() }
+        BrowserTestUi.tap(R.string.resume_playback)
         BrowserTestUi.waitUntil { original.isPlaying }
         scenario.onActivity { assertEquals(View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility) }
     }
@@ -826,13 +827,15 @@ class PlaybackSelectionTest {
     @Test fun lostLocalFileDuringInformationIsNotResumedFromCache() = withPlayback { scenario, fixture ->
         val original = positionAtThirty(scenario, fixture, paused = false)
         openInformation(scenario)
+        var pausedPosition = 0L
+        scenario.onActivity { pausedPosition = original.currentPosition; assertFalse(original.playWhenReady) }
         assertTrue(fixture.files[1].delete())
         closeInformationWithOk(scenario)
         waitForTitle(R.string.playback_source_unavailable)
         scenario.onActivity {
             assertFalse(original.playWhenReady)
             assertSame(original, fixture.playerView.player)
-            assertEquals(30_000.0, original.currentPosition.toDouble(), 250.0)
+            assertEquals(pausedPosition.toDouble(), original.currentPosition.toDouble(), 250.0)
         }
     }
 
