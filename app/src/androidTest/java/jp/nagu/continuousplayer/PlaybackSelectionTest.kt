@@ -68,7 +68,7 @@ class PlaybackSelectionTest {
             assertEquals(!paused, original.playWhenReady)
             assertEquals(2, original.mediaItemCount)
             assertEquals(fixture.files[1].toURI().path, original.currentMediaItem?.localConfiguration?.uri?.path)
-            assertEquals(if (paused) View.VISIBLE else View.GONE,
+            assertEquals(View.VISIBLE,
                 it.findViewById<View>(R.id.pause_overlay).visibility)
         }
     }
@@ -397,7 +397,7 @@ class PlaybackSelectionTest {
         BrowserTestUi.waitUntil { fixture.playerView.rootView.hasWindowFocus() }
         BrowserTestUi.tap(R.string.resume_playback)
         BrowserTestUi.waitUntil { original.isPlaying }
-        scenario.onActivity { assertEquals(View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility) }
+        scenario.onActivity { assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility) }
     }
 
     @Test fun interruptionWithInformationOpenStaysPausedAfterClosing() = withPlayback { scenario, fixture ->
@@ -444,7 +444,7 @@ class PlaybackSelectionTest {
             assertSame(original, fixture.playerView.player)
             assertEquals(!paused, original.playWhenReady)
             assertEquals(1, original.currentMediaItemIndex)
-            assertEquals(if (paused) View.VISIBLE else View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility)
+            assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility)
         }
     }
 
@@ -509,7 +509,7 @@ class PlaybackSelectionTest {
             BrowserTestUi.waitUntil { original.isPlaying }
             scenario.onActivity {
                 assertTrue(fixture.playerView.hasFocus())
-                assertEquals(View.GONE, it.findViewById<View>(R.id.pause_overlay).visibility)
+                assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility)
             }
         } finally {
             scenario.onActivity {

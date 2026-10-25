@@ -190,6 +190,17 @@
                 android:textColor="@android:color/white"
                 android:textSize="14sp" />
 
+             <TextView
+                android:id="@+id/playback_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="8dp"
+                android:gravity="center"
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:accessibilityLiveRegion="polite"
+                android:visibility="gone" />
+
              <LinearLayout
                 android:id="@+id/player_transport_controls"
                 android:layout_width="match_parent"

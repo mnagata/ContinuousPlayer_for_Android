@@ -1,5 +1,6 @@
 package jp.nagu.continuousplayer
 
+import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -7,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
@@ -169,6 +171,7 @@ internal class DlnaSelectionDialog(
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility") // Pointer context action shares the native accessible long-click.
     private fun renderContent() {
         val current = content
         findViewById<TextView>(R.id.dlna_label).apply {
@@ -295,6 +298,26 @@ internal class DlnaSelectionDialog(
                 if (awaitingDirectory) false else current.onLongSelected?.let { it(position); true } ?: false
             }
             isLongClickable = current.onLongSelected != null
+            var contextPress = false
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    contextPress = event.isPointerInput() && event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)
+                    if (contextPress && !awaitingDirectory) {
+                        val position = pointToPosition(event.x.toInt(), event.y.toInt())
+                        if (position != ListView.INVALID_POSITION) current.onLongSelected?.invoke(position)
+                    }
+                }
+                val handled = contextPress
+                if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    contextPress = false
+                }
+                handled
+            }
+            // Secondary-button notifications accompany the DOWN/UP handled above.
+            setOnGenericMotionListener { _, event ->
+                event.isPointerInput() && event.actionButton == MotionEvent.BUTTON_SECONDARY &&
+                    (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE)
+            }
         }
         findViewById<View>(R.id.dlna_message_container).visibility = if (current.rows.isEmpty()) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.dlna_message).text = current.message

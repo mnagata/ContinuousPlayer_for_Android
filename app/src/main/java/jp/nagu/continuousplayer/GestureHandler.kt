@@ -24,8 +24,17 @@ class GestureHandler(
     private var startX = 0f
     private var startY = 0f
     private var tapEligible = false
+    private var pointerInput = false
 
     fun onTouchEvent(event: MotionEvent): Boolean {
+        val isPointer = event.isPointerInput()
+        if (isPointer && (event.classification == MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE ||
+                event.classification == MotionEvent.CLASSIFICATION_PINCH ||
+                (event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL &&
+                    event.buttonState != MotionEvent.BUTTON_PRIMARY))) {
+            cancel()
+            return true
+        }
         if (event.actionMasked == MotionEvent.ACTION_CANCEL || event.pointerCount > 1 ||
             event.actionMasked == MotionEvent.ACTION_POINTER_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_UP
         ) {
@@ -34,7 +43,10 @@ class GestureHandler(
             return true
         }
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            if (pointerId != MotionEvent.INVALID_POINTER_ID) cancel()
+            if (pointerId != MotionEvent.INVALID_POINTER_ID || isPointer != pointerInput) cancel()
+            pointerInput = isPointer
+            // Holding a primary mouse button is still a click when released without dragging.
+            detector.setIsLongpressEnabled(!isPointer)
             pointerId = event.getPointerId(0)
             startX = event.x
             startY = event.y
@@ -43,6 +55,7 @@ class GestureHandler(
             return true
         }
         if (pointerId == MotionEvent.INVALID_POINTER_ID) return true
+        if (isPointer != pointerInput) { cancel(); return true }
         val index = event.findPointerIndex(pointerId)
         if (index < 0) {
             cancel()
@@ -55,7 +68,7 @@ class GestureHandler(
         when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> detector.onTouchEvent(event)
             MotionEvent.ACTION_UP -> {
-                val direction = SwipeDirection.fromDistance(event.getX(index) - startX,
+                val direction = if (isPointer) null else SwipeDirection.fromDistance(event.getX(index) - startX,
                     event.getY(index) - startY, view.resources.displayMetrics.density)
                 if (direction != null || !tapEligible) {
                     // A drag never becomes a tap, including after an accepted nearby tap.
@@ -95,6 +108,7 @@ class GestureHandler(
     override fun onSingleTapUp(e: MotionEvent): Boolean {
         val third = view.width / 3f
         val region = when {
+            e.isPointerInput() -> TapRegion.TOGGLE
             e.x < third -> TapRegion.REWIND
             e.x < third * 2 -> TapRegion.TOGGLE
             else -> TapRegion.FORWARD

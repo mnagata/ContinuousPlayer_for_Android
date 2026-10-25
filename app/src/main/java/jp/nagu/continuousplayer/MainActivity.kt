@@ -10,11 +10,13 @@ import android.content.res.Configuration
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.LayoutInflater
 import android.view.View
+import android.view.accessibility.AccessibilityManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -56,6 +58,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var audioManager: AudioManager
     private var gestureHandler: GestureHandler? = null
     private var multiTouchSequence = false
+    private var pointerControls: PointerControls? = null
+    private var pointerFocusGesture = false
+    private var playbackWindowFocused = false
+    private var lastWindowFocusGain = Long.MIN_VALUE
 
     private lateinit var folderSelectContainer: LinearLayout
     private lateinit var playerContainer: FrameLayout
@@ -71,6 +77,11 @@ class MainActivity : AppCompatActivity() {
     private var playbackErrorDialog: AlertDialog? = null
     private val playbackModalDialogs = mutableSetOf<AlertDialog>()
     private var userPaused = false
+    private var audioOnlyMedia = false
+    private lateinit var accessibilityManager: AccessibilityManager
+    private val touchExplorationListener = AccessibilityManager.TouchExplorationStateChangeListener {
+        updatePauseOverlay()
+    }
     private var isInBackground = false
     private var pendingUsbFolder: PlaybackFolder.Usb? = null
     private var playbackSelection: RetainedPlayback? = null
@@ -181,6 +192,8 @@ class MainActivity : AppCompatActivity() {
         }
         selectFolderButton = findViewById(R.id.btn_select_folder)
         overlayPlayPauseButton = findViewById(R.id.btn_overlay_play_pause)
+        accessibilityManager = getSystemService(AccessibilityManager::class.java)
+        accessibilityManager.addTouchExplorationStateChangeListener(touchExplorationListener)
 
         selectFolderButton.setOnClickListener {
             launchPicker()
@@ -258,6 +271,20 @@ class MainActivity : AppCompatActivity() {
           }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.isPointerInput()) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                // Input timestamps precede the focus callback when the same click activates a window.
+                pointerFocusGesture = !playbackWindowFocused || !window.decorView.hasWindowFocus() ||
+                    event.downTime <= lastWindowFocusGain
+            }
+            if (pointerFocusGesture) {
+                gestureHandler?.cancel()
+                if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    pointerFocusGesture = false
+                }
+                return true
+            }
+        }
         if (event.actionMasked == MotionEvent.ACTION_DOWN) multiTouchSequence = false
         if (event.pointerCount > 1) multiTouchSequence = true
         if (multiTouchSequence || event.actionMasked == MotionEvent.ACTION_CANCEL) gestureHandler?.cancel()
@@ -265,10 +292,26 @@ class MainActivity : AppCompatActivity() {
         try {
             return super.dispatchTouchEvent(event)
         } finally {
+            // Reveal after hit testing, so newly shown buttons cannot steal a background DOWN.
+            if (event.isPointerInput()) pointerControls?.onPointerEvent(event)
+            else if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                pointerControls?.reset()
+            }
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
                 multiTouchSequence = false
             }
         }
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.isPointerInput()) {
+            pointerControls?.onPointerEvent(event)
+            if (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS &&
+                event.actionButton != MotionEvent.BUTTON_PRIMARY) gestureHandler?.cancel()
+            // The browser's own window retains normal wheel scrolling.
+            if (event.actionMasked == MotionEvent.ACTION_SCROLL && playerController != null) return true
+        }
+        return super.dispatchGenericMotionEvent(event)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -323,6 +366,7 @@ class MainActivity : AppCompatActivity() {
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             // Keep the whole gesture even when its action changes the screen or focus.
             playbackKeyPresses[key] = event.downTime
+            pointerControls?.reset()
             gestureHandler?.cancel()
             action()
         }
@@ -572,13 +616,18 @@ class MainActivity : AppCompatActivity() {
                 mediaItem: androidx.media3.common.MediaItem?,
                 reason: Int
                    ) {
+                audioOnlyMedia = false
                 Log.d(TAG, "onMediaItemTransition: mediaItem=$mediaItem, reason=$reason")
                 updatePortraitVideoInfo()
                 updatePauseOverlay()
                    }
 
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                // Empty tracks during buffering do not reclassify the current item.
+                if (!tracks.isEmpty) audioOnlyMedia = tracks.containsType(androidx.media3.common.C.TRACK_TYPE_AUDIO) &&
+                    !tracks.containsType(androidx.media3.common.C.TRACK_TYPE_VIDEO)
                 updatePortraitVideoInfo()
+                updatePauseOverlay()
                    }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -586,7 +635,12 @@ class MainActivity : AppCompatActivity() {
                 if (playbackState == androidx.media3.common.Player.STATE_READY) {
                     updatePortraitVideoInfo()
                        }
+                updatePauseOverlay()
                    }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                updatePauseOverlay()
+            }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (playbackSelection != null || playbackInformation != null) {
@@ -597,6 +651,9 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (playWhenReady) {
                     userPaused = false
+                    // Audio controls remain visible, but TV transport keys return to playback.
+                    if (isTelevision && !accessibilityManager.isTouchExplorationEnabled &&
+                        currentFocus?.let { isDescendantOf(it, pauseOverlay) } == true) playerView.requestFocus()
                 } else if (!isInBackground && controller.player.playerError == null &&
                     reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
                 ) {
@@ -621,6 +678,18 @@ class MainActivity : AppCompatActivity() {
             onPlayPauseToggled = { updatePauseOverlay() }
         )
         gestureHandler = handler
+        pointerControls = PointerControls(
+            touchOverlay, pauseOverlay,
+            listOf(R.id.btn_overlay_home, R.id.btn_overlay_select_folder, R.id.btn_overlay_info,
+                R.id.btn_overlay_previous, R.id.btn_overlay_rewind, R.id.btn_overlay_play_pause,
+                R.id.btn_overlay_forward, R.id.btn_overlay_next).map { findViewById(it) },
+            canReveal = { !isInBackground && playerController != null && !isPlaybackInputBlocked() },
+            canAutoHide = {
+                controller.player.playWhenReady && !mustShowPlaybackControls() &&
+                    controller.player.currentTracks.isTypeSelected(androidx.media3.common.C.TRACK_TYPE_VIDEO)
+            },
+            onChanged = { updatePauseOverlay() }
+        )
         touchOverlay.setOnTouchListener { _, event ->
             if (isPlaybackInputBlocked() || multiTouchSequence) gestureHandler?.cancel()
             else gestureHandler?.onTouchEvent(event)
@@ -631,6 +700,8 @@ class MainActivity : AppCompatActivity() {
           }
 
     private fun stopPlayback() {
+        pointerControls?.release()
+        pointerControls = null
         gestureHandler?.cancel()
         gestureHandler = null
         playbackSelection = null
@@ -641,6 +712,7 @@ class MainActivity : AppCompatActivity() {
         informationDialog?.dismiss()
         informationDialog = null
         userPaused = false
+        audioOnlyMedia = false
         playbackModalDialogs.toList().forEach { it.dismiss() }
         playbackErrorDialog = null
         playerView.keepScreenOn = false
@@ -656,7 +728,7 @@ class MainActivity : AppCompatActivity() {
     private fun showPlaybackError(error: androidx.media3.common.PlaybackException) {
         if (isFinishing || isDestroyed) return
         val player = playerController?.player ?: return
-        userPaused = false
+        userPaused = true
         player.pause()
         updatePauseOverlay()
         val filename = viewModel.videos.getOrNull(player.currentMediaItemIndex)?.displayName.orEmpty()
@@ -770,19 +842,45 @@ class MainActivity : AppCompatActivity() {
         playerController?.setExternalCommandsBlocked(isPlaybackInputBlocked())
     }
 
+    private fun mustShowPlaybackControls(): Boolean {
+        val player = playerController?.player ?: return false
+        return userPaused || audioOnlyMedia || player.playbackState == Player.STATE_ENDED ||
+            player.playerError != null || accessibilityManager.isTouchExplorationEnabled
+    }
+
     private fun updatePauseOverlay() {
         updateExternalPlaybackCommands()
+        pointerControls?.refresh()
         val wasVisible = pauseOverlay.visibility == View.VISIBLE
-        val show = userPaused && !isInBackground && playerController != null &&
+        val show = (mustShowPlaybackControls() || pointerControls?.visible == true) && !isInBackground && playerController != null &&
             playbackSelection == null && playbackInformation == null
         pauseOverlay.visibility = if (show) View.VISIBLE else View.GONE
         if (show && !wasVisible) ViewCompat.requestApplyInsets(pauseOverlay)
         updateTransportButtons()
+        val player = playerController?.player
+        val ended = player?.playbackState == Player.STATE_ENDED
+        val failed = player?.playerError != null
+        val playing = player?.playWhenReady == true && !ended && !failed
+        val playPauseLabel = getString(if (playing) R.string.pause_playback else R.string.resume_playback)
+        overlayPlayPauseButton.apply {
+            setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+            contentDescription = playPauseLabel
+            tooltipText = playPauseLabel
+        }
+        findViewById<TextView>(R.id.playback_status).apply {
+            val message = when {
+                failed -> getString(R.string.playback_failed)
+                ended -> getString(R.string.playback_completed)
+                else -> ""
+            }
+            if (text.toString() != message) text = message
+            visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
+        }
         if (show) {
             val index = playerController?.player?.currentMediaItemIndex ?: 0
             val video = viewModel.videos.getOrNull(index)
             overlayFilename.text = video?.displayName ?: ""
-            if (isTelevision && currentFocus?.let { isDescendantOf(it, pauseOverlay) } != true) {
+            if ((userPaused || ended || failed) && isTelevision && currentFocus?.let { isDescendantOf(it, pauseOverlay) } != true) {
                 overlayPlayPauseButton.requestFocus()
             }
                }
@@ -872,6 +970,7 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
+        pointerControls?.reset()
         gestureHandler?.cancel()
         super.onConfigurationChanged(newConfig)
         if (::dlnaBrowser.isInitialized) dlnaBrowser.onConfigurationChanged()
@@ -929,7 +1028,12 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
-        if (!hasFocus) gestureHandler?.cancel()
+        playbackWindowFocused = hasFocus
+        if (hasFocus) lastWindowFocusGain = SystemClock.uptimeMillis()
+        if (!hasFocus) {
+            gestureHandler?.cancel()
+            pointerControls?.reset()
+        }
         super.onWindowFocusChanged(hasFocus)
         updateExternalPlaybackCommands()
         if (hasFocus && ::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null && playbackInformation == null) {
@@ -938,6 +1042,7 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onStop() {
+        pointerControls?.reset()
         gestureHandler?.cancel()
         homeMenu?.dismiss()
         lastPlaybackFolder.save(viewModel.playbackFolder)
@@ -958,6 +1063,9 @@ private fun updatePortraitVideoInfo() {
           }
 
     override fun onDestroy() {
+        if (::accessibilityManager.isInitialized) {
+            accessibilityManager.removeTouchExplorationStateChangeListener(touchExplorationListener)
+        }
         super.onDestroy()
         if (::usbBrowser.isInitialized) usbBrowser.close()
         if (::dlnaBrowser.isInitialized) dlnaBrowser.close()

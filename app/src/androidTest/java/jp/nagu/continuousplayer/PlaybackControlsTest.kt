@@ -158,7 +158,7 @@ class PlaybackControlsTest {
         saveScreenshot(fixture, "portrait")
     }
 
-    @Test fun rotationAndOverlayVisibilityKeepPlayerGeometryStable() = withPlayback { scenario, fixture ->
+    @Test fun rotationAndOverlayVisibilityKeepPlayerGeometryStable() = withPlayback(video = true) { scenario, fixture ->
         var requested = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         var target = Configuration.ORIENTATION_LANDSCAPE
         lateinit var activity: MainActivity
@@ -307,7 +307,7 @@ class PlaybackControlsTest {
 
     private data class Fixture(val playerView: PlayerView, val player: Player, val videos: List<VideoItem>)
 
-    private fun withPlayback(count: Int = 3, action: (ActivityScenario<MainActivity>, Fixture) -> Unit) {
+    private fun withPlayback(count: Int = 3, video: Boolean = false, action: (ActivityScenario<MainActivity>, Fixture) -> Unit) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = File(context.cacheDir, "d07-controls-fixture").apply { deleteRecursively(); mkdirs() }
         val preferences = context.getSharedPreferences("last_playback_folder", Context.MODE_PRIVATE)
@@ -318,9 +318,10 @@ class PlaybackControlsTest {
             .putInt(16).putShort(1).putShort(1).putInt(8_000).putInt(16_000)
             .putShort(2).putShort(16).put("data".toByteArray()).putInt(dataSize).array()
         val videos = (1..count).map { index ->
-            val name = "D07 Episode $index — 長いファイル名でも操作ボタンに重ならず表示されることを確認します.wav"
-            val file = File(directory, name).apply { writeBytes(wave) }
-            VideoItem(file.toURI().toString(), name, file.length(), file.lastModified(), "audio/wav")
+            val name = "D07 Episode $index — 長いファイル名でも操作ボタンに重ならず表示されることを確認します.${if (video) "mp4" else "wav"}"
+            val bytes = if (video) InstrumentationRegistry.getInstrumentation().context.assets.open("d13-video.mp4").use { it.readBytes() } else wave
+            val file = File(directory, name).apply { writeBytes(bytes) }
+            VideoItem(file.toURI().toString(), name, file.length(), file.lastModified(), if (video) "video/mp4" else "audio/wav")
         }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
