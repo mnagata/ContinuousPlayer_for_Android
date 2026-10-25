@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
     private var informationDialog: AlertDialog? = null
     private var informationJob: Job? = null
     private var homeMenu: PopupMenu? = null
+    private val playbackKeyPresses = mutableMapOf<Pair<Int, Int>, Long>()
 
     private data class RetainedPlayback(
         val controller: PlayerController,
@@ -182,11 +183,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btn_home_more).setOnClickListener { showHomeMenu() }
 
-        findViewById<ImageButton>(R.id.btn_overlay_home).setOnClickListener {
-            closeSelectionBrowsers()
-            stopPlayback()
-            showFolderSelect()
-        }
+        findViewById<ImageButton>(R.id.btn_overlay_home).setOnClickListener { returnHome() }
 
         overlayPlayPauseButton.setOnClickListener {
             togglePlayPause()
@@ -249,119 +246,65 @@ class MainActivity : AppCompatActivity() {
           }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null &&
-            event.keyCode == KeyEvent.KEYCODE_I && event.hasNoModifiers() &&
-            currentFocus?.onCheckIsTextEditor() != true
-        ) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                if (playbackInformation != null) closeInformation() else showInfoDialog()
-            }
-            return true
-        }
-        if (playbackInformation != null) {
-            if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
-                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) closeInformation()
-                return true
-            }
-            return super.dispatchKeyEvent(event)
-        }
-        if (::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null &&
-            event.keyCode in listOf(KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_O) &&
-            event.hasNoModifiers() && currentFocus?.onCheckIsTextEditor() != true
-        ) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                openCurrentPlaybackSelection()
-            }
-            // Consume key-up and repeats as part of the same shortcut gesture.
+        val key = event.deviceId to event.keyCode
+        if (playbackKeyPresses[key] == event.downTime) {
+            // Focus can move to a button after pausing. Its key-up must not click it too.
+            if (event.action == KeyEvent.ACTION_UP) playbackKeyPresses.remove(key)
             return true
         }
         if (!::viewModel.isInitialized || !viewModel.isPlayerScreen || playbackSelection != null ||
-            event.action != KeyEvent.ACTION_DOWN ||
-            event.repeatCount != 0
-        ) {
-            return super.dispatchKeyEvent(event)
+            playbackInformation != null || currentFocus?.onCheckIsTextEditor() == true ||
+            !window.decorView.hasWindowFocus()
+        ) return super.dispatchKeyEvent(event)
+
+        val controller = playerController ?: return super.dispatchKeyEvent(event)
+        val player = controller.player
+        val componentHasFocus = currentFocus?.let { focus ->
+            focus.isShown && focus !== playerView && !isDescendantOf(focus, playerView)
+        } == true
+        val noModifiers = event.hasNoModifiers()
+        val action: (() -> Unit)? = when {
+            noModifiers && event.keyCode in listOf(KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_O) ->
+                ::openCurrentPlaybackSelection
+            noModifiers && event.keyCode in listOf(KeyEvent.KEYCODE_I, KeyEvent.KEYCODE_INFO) ->
+                ::showInfoDialog
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_H -> ::returnHome
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> ::togglePlayPause
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY -> ({ player.play(); updatePauseOverlay() })
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ->
+                ({ userPaused = true; player.pause(); updatePauseOverlay() })
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS -> controller::previousVideo
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT -> controller::nextVideo
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND -> controller::seekBackward
+            noModifiers && event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> controller::seekForward
+            !componentHasFocus && noModifiers && event.keyCode in listOf(KeyEvent.KEYCODE_SPACE,
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
+                KeyEvent.KEYCODE_BUTTON_A) -> ::togglePlayPause
+            !componentHasFocus && noModifiers && event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ->
+                controller::previousVideo
+            !componentHasFocus && noModifiers && event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ->
+                controller::nextVideo
+            !componentHasFocus && ((noModifiers && event.keyCode == KeyEvent.KEYCODE_DPAD_UP) ||
+                (event.hasModifiers(KeyEvent.META_SHIFT_ON) && event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT)) ->
+                controller::seekBackward
+            !componentHasFocus && ((noModifiers && event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) ||
+                (event.hasModifiers(KeyEvent.META_SHIFT_ON) && event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) ->
+                controller::seekForward
+            else -> null
         }
-
-        val player = playerController?.player ?: return super.dispatchKeyEvent(event)
-        val pauseMenuHasFocus = !player.isPlaying && pauseOverlay.visibility == View.VISIBLE &&
-            currentFocus?.let { focus -> isDescendantOf(focus, pauseOverlay) } == true
-
-        return when (event.keyCode) {
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                togglePlayPause()
-                true
-            }
-
-            KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                player.play()
-                updatePauseOverlay()
-                true
-            }
-
-            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                userPaused = true
-                player.pause()
-                updatePauseOverlay()
-                true
-            }
-
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_NUMPAD_ENTER,
-            KeyEvent.KEYCODE_BUTTON_A -> {
-                if (pauseMenuHasFocus) {
-                    super.dispatchKeyEvent(event)
-                } else {
-                    togglePlayPause()
-                    true
-                }
-            }
-
-            KeyEvent.KEYCODE_DPAD_UP,
-            KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                if (pauseMenuHasFocus) super.dispatchKeyEvent(event)
-                else {
-                    playerController?.seekBackward()
-                    true
-                }
-            }
-
-            KeyEvent.KEYCODE_DPAD_DOWN,
-            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                if (pauseMenuHasFocus) super.dispatchKeyEvent(event)
-                else {
-                    playerController?.seekForward()
-                    true
-                }
-            }
-
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                if (pauseMenuHasFocus && event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                    super.dispatchKeyEvent(event)
-                } else {
-                    playerController?.previousVideo()
-                    true
-                }
-            }
-
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                if (pauseMenuHasFocus && event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    super.dispatchKeyEvent(event)
-                } else {
-                    playerController?.nextVideo()
-                    true
-                }
-            }
-
-            KeyEvent.KEYCODE_INFO -> {
-                showInfoDialog()
-                true
-            }
-
-            else -> super.dispatchKeyEvent(event)
+        if (action == null) return super.dispatchKeyEvent(event)
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            // Keep the whole gesture even when its action changes the screen or focus.
+            playbackKeyPresses[key] = event.downTime
+            action()
         }
+        return true
+    }
+
+    private fun returnHome() {
+        closeSelectionBrowsers()
+        stopPlayback()
+        showFolderSelect()
     }
 
     private fun isDescendantOf(view: View, ancestor: View): Boolean {
@@ -636,7 +579,7 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "startPlayback: calling setPlaylist, videos=${videos.size}")
         controller.setPlaylist(videos, startIndex)
         playerView.keepScreenOn = true
-        playerView.isFocusable = isTelevision
+        playerView.isFocusable = true
         if (isTelevision) playerView.requestFocus()
         Log.d(TAG, "startPlayback: calling updatePortraitVideoInfo")
         updatePortraitVideoInfo()
@@ -786,7 +729,7 @@ class MainActivity : AppCompatActivity() {
                 overlayPlayPauseButton.requestFocus()
             }
                }
-        if (!show && wasVisible && isTelevision) playerView.requestFocus()
+        if (!show && wasVisible && (isTelevision || !playerView.isInTouchMode)) playerView.requestFocus()
           }
 
     private fun updateTransportButtons() {

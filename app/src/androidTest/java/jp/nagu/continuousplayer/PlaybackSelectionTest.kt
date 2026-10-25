@@ -307,6 +307,30 @@ class PlaybackSelectionTest {
         BrowserTestUi.waitUntil { original.playWhenReady && !browserShowing() }
     }
 
+    @Test fun backspaceNavigatesToSavedFoldersThenRestoresPlaybackAtThirtySeconds() = withPlayback { scenario, fixture ->
+        val original = openSelection(scenario, fixture, paused = false)
+        val down = SystemClock.uptimeMillis()
+        keyEvent(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, down)
+        waitForTitle(fixture.root.name)
+        keyEvent(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, down, repeat = 1)
+        keyEvent(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP, down)
+        scenario.onActivity {
+            assertNotNull(window(fixture.root.name))
+            assertFalse(original.playWhenReady)
+            val list = window(fixture.root.name)!!.findViewById<ListView>(R.id.dlna_list)
+            assertEquals(fixture.directory.name, (list.selectedItem as DlnaRow).title)
+        }
+        keyStroke(KeyEvent.KEYCODE_DEL)
+        waitForTitle(R.string.saf_choose_folder)
+        keyStroke(KeyEvent.KEYCODE_DEL)
+        BrowserTestUi.waitUntil { original.playWhenReady && !browserShowing() }
+        scenario.onActivity {
+            assertSame(original, fixture.playerView.player)
+            assertEquals(30_000.0, original.currentPosition.toDouble(), 1_500.0)
+            assertSame(fixture.playlist, ViewModelProvider(it)[PlayerViewModel::class.java].videos)
+        }
+    }
+
     @Test fun modifiedOIsNotTheFileListShortcut() = withPlayback { scenario, fixture ->
         val original = fixture.playerView.player!!
         keyStroke(KeyEvent.KEYCODE_O, KeyEvent.META_CTRL_ON)

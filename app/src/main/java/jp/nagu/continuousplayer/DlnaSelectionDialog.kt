@@ -77,18 +77,27 @@ internal class DlnaSelectionDialog(
         setOnCancelListener { content.onClose() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val up = content.onUp.takeUnless { awaitingDirectory }
-                if (up != null) up() else {
-                    dismiss()
-                    content.onClose()
-                }
+                navigateUpOrCancel()
             }
         })
         renderContent()
         setOnShowListener { focusSelection() }
     }
 
+    private fun navigateUpOrCancel() {
+        val up = content.onUp.takeUnless { awaitingDirectory }
+        if (up != null) up() else {
+            dismiss()
+            content.onClose()
+        }
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (currentFocus?.onCheckIsTextEditor() == true) return super.dispatchKeyEvent(event)
+        if (event.keyCode == KeyEvent.KEYCODE_DEL && event.hasNoModifiers()) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) navigateUpOrCancel()
+            return true
+        }
         if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                 dismiss()
@@ -99,9 +108,10 @@ internal class DlnaSelectionDialog(
         val pageKey = when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_PAGE_UP
             KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_PAGE_DOWN
+            KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_PAGE_DOWN -> event.keyCode
             else -> null
         }
-        if (content.fileSelection && list.hasFocus() && pageKey != null) {
+        if (content.fileSelection && list.hasFocus() && pageKey != null && event.hasNoModifiers()) {
             if (!awaitingDirectory && list.isEnabled) {
                 // Use ListView's page navigation so selection stays within the visible page.
                 list.dispatchKeyEvent(KeyEvent(event.downTime, event.eventTime, event.action,

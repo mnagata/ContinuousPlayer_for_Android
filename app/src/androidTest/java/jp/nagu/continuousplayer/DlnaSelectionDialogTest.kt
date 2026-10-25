@@ -554,6 +554,138 @@ class DlnaSelectionDialogTest {
                         onSelected: (Int) -> Unit = {}) = DlnaSelectionDialog(activity,
         fixtureContent(initialSelection, onUp, onClose, onSelected))
 
+    @Test fun backspaceMovesOneLevelAndThenCancelsWithoutRepeating() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            var parents = 0
+            var cancelled = 0
+            scenario.onActivity { activity ->
+                dialog = DlnaSelectionDialog(activity, fixtureContent(onUp = {
+                    parents++
+                    dialog.updateContent(fixtureContent(onClose = { cancelled++ }).copy(title = "Root", onUp = null))
+                }, onClose = { cancelled++ }))
+                dialog.show()
+            }
+            BrowserTestUi.waitUntil { dialog.window?.decorView?.hasWindowFocus() == true }
+            val down = SystemClock.uptimeMillis()
+            keyboardEvent(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, down)
+            keyboardEvent(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, down, repeat = 1)
+            keyboardEvent(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP, down)
+            scenario.onActivity { assertEquals(1, parents); assertEquals(0, cancelled); assertTrue(dialog.isShowing) }
+            sendKeyboardKey(KeyEvent.KEYCODE_DEL)
+            scenario.onActivity { assertEquals(1, cancelled); assertFalse(dialog.isShowing) }
+        }
+    }
+
+    @Test fun backspaceWhileLoadingCancelsLikeAndroidBack() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            var parents = 0
+            var cancelled = 0
+            scenario.onActivity {
+                dialog = DlnaSelectionDialog(it, fixtureContent(onUp = { parents++ }, onClose = { cancelled++ }))
+                dialog.show()
+                assertTrue(dialog.keepListWhileLoading())
+            }
+            BrowserTestUi.waitUntil { dialog.window?.decorView?.hasWindowFocus() == true }
+            sendKeyboardKey(KeyEvent.KEYCODE_DEL)
+            scenario.onActivity { assertEquals(0, parents); assertEquals(1, cancelled); assertFalse(dialog.isShowing) }
+        }
+    }
+
+    @Test fun modifiedBackspaceDoesNotNavigate() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            var navigated = 0
+            scenario.onActivity {
+                dialog = DlnaSelectionDialog(it, fixtureContent(onUp = { navigated++ }, onClose = { navigated++ }))
+                dialog.show()
+            }
+            BrowserTestUi.waitUntil { dialog.window?.decorView?.hasWindowFocus() == true }
+            sendKeyboardKey(KeyEvent.KEYCODE_DEL, KeyEvent.META_CTRL_ON)
+            sendKeyboardKey(KeyEvent.KEYCODE_DEL, KeyEvent.META_ALT_ON)
+            scenario.onActivity { assertEquals(0, navigated); assertTrue(dialog.isShowing); dialog.dismiss() }
+        }
+    }
+
+    @Test fun editorBackspaceDeletesTextWithoutNavigatingTheBrowser() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            lateinit var editor: android.widget.EditText
+            var navigated = 0
+            scenario.onActivity {
+                dialog = DlnaSelectionDialog(it, fixtureContent(onUp = { navigated++ }, onClose = { navigated++ }))
+                dialog.show()
+                editor = android.widget.EditText(it).apply {
+                    showSoftInputOnFocus = false; setText("NAS"); setSelection(length())
+                    isFocusableInTouchMode = true
+                }
+                dialog.addContentView(editor, android.view.ViewGroup.LayoutParams(300, 100))
+                assertTrue(editor.requestFocus())
+            }
+            BrowserTestUi.waitUntil { dialog.window?.decorView?.hasWindowFocus() == true }
+            sendKeyboardKey(KeyEvent.KEYCODE_DEL)
+            scenario.onActivity { assertEquals("NA", editor.text.toString()); assertEquals(0, navigated); assertTrue(dialog.isShowing); dialog.dismiss() }
+        }
+    }
+
+    @Test fun pageUpDownMatchHorizontalPagingAndKeepFocusAtBothEnds() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var dialog: DlnaSelectionDialog
+            var selected = -1
+            scenario.onActivity {
+                dialog = DlnaSelectionDialog(it, fixtureContent(onSelected = { selected = it }).copy(
+                    rows = (0 until 80).map { DlnaRow("File $it.wav", R.drawable.ic_play) }))
+                dialog.show()
+                dialog.findViewById<ListView>(R.id.dlna_list).apply { requestFocusFromTouch(); setSelectionFromTop(0, 0) }
+            }
+            BrowserTestUi.waitUntil { dialog.window?.decorView?.hasWindowFocus() == true }
+            sendKeyboardKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            var expected = -1
+            scenario.onActivity {
+                val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                expected = list.selectedItemPosition
+                assertTrue(expected > 1)
+                list.setSelectionFromTop(0, 0)
+            }
+            idle()
+            sendKeyboardKey(KeyEvent.KEYCODE_PAGE_DOWN)
+            scenario.onActivity {
+                val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                assertEquals(expected, list.selectedItemPosition)
+                assertTrue(expected in list.firstVisiblePosition..list.lastVisiblePosition)
+                assertSame(list, dialog.currentFocus)
+            }
+            sendKeyboardKey(KeyEvent.KEYCODE_PAGE_UP)
+            sendKeyboardKey(KeyEvent.KEYCODE_PAGE_UP)
+            scenario.onActivity {
+                val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                assertEquals(0, list.selectedItemPosition); assertSame(list, dialog.currentFocus)
+                list.setSelectionFromTop(79, 0)
+            }
+            idle()
+            sendKeyboardKey(KeyEvent.KEYCODE_PAGE_DOWN)
+            scenario.onActivity {
+                val list = dialog.findViewById<ListView>(R.id.dlna_list)
+                assertEquals(79, list.selectedItemPosition); assertSame(list, dialog.currentFocus)
+                assertEquals(-1, selected); dialog.dismiss()
+            }
+        }
+    }
+
+    private fun sendKeyboardKey(key: Int, modifiers: Int = 0) {
+        val down = SystemClock.uptimeMillis()
+        keyboardEvent(key, KeyEvent.ACTION_DOWN, down, modifiers = modifiers)
+        keyboardEvent(key, KeyEvent.ACTION_UP, down, modifiers = modifiers)
+    }
+
+    private fun keyboardEvent(key: Int, action: Int, down: Long, repeat: Int = 0, modifiers: Int = 0) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, SystemClock.uptimeMillis(),
+            action, key, repeat, modifiers, -1, 0, 0, InputDevice.SOURCE_KEYBOARD), true))
+        idle()
+    }
+
     private fun fixtureContent(initialSelection: Int = 0, onUp: () -> Unit = {}, onClose: () -> Unit = {},
                                onSelected: (Int) -> Unit = {}) = DlnaDialogContent(
         title = "アニメ OP / ED",
