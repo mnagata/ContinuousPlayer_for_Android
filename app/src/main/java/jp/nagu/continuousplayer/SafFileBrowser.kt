@@ -67,11 +67,14 @@ class SafFileBrowser(
 
     fun openSavedFolders() = showRoots()
 
-    internal fun openSavedFolders(inheritedDialog: DlnaSelectionDialog?) {
+    internal fun openSavedFolders(inheritedDialog: DlnaSelectionDialog?, focusDlna: SavedDlnaFolder? = null,
+        focusUsb: SavedUsbFolder? = null) {
         close()
         dialog = inheritedDialog
-        showRoots()
+        showRoots(focusDlna = focusDlna, focusUsb = focusUsb)
     }
+
+    internal fun folderRegistered(treeUri: Uri) = showRoots(focusUri = treeUri)
 
     fun open(treeUri: Uri? = null) {
         if (treeUri != null) {
@@ -94,7 +97,6 @@ class SafFileBrowser(
         job = null
         val isTv = activity.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK ==
             android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
-        val hasRoots = grantedTrees().isNotEmpty() || hasSavedDlnaFolders() || savedUsbFolders.all().isNotEmpty()
         val sources = buildList<Pair<DlnaRow, () -> Unit>> {
             add(DlnaRow(activity.getString(R.string.saved_folder_local), R.drawable.ic_folder_open,
                 detail = activity.getString(R.string.add_folder_local_detail)) to onAddFolder)
@@ -104,9 +106,8 @@ class SafFileBrowser(
             }
             add(DlnaRow(activity.getString(R.string.dlna_select), R.drawable.ic_dlna_server,
                 detail = activity.getString(R.string.add_folder_dlna_detail)) to {
-                // Attach the DLNA loading window before releasing this one.
+                // The receiver takes ownership of the attached window.
                 onAddDlna()
-                close()
             })
         }
         showDialog(DlnaDialogContent(
@@ -115,16 +116,17 @@ class SafFileBrowser(
             hint = R.string.add_folder_source_hint,
             rows = sources.map { it.first },
             upLabel = R.string.saved_folder_list,
-            onUp = if (hasRoots) ({ showRoots() }) else null,
-            onClose = { cancel() },
+            onUp = { showRoots() },
+            onClose = { showRoots() },
             onSelected = { index ->
                 // Keep this window underneath the SAF/USB picker so cancelling returns here.
                 sources[index].second()
             }))
     }
 
-    private fun showRoots(focusUri: Uri? = null) {
-        load(retry = { showRoots(focusUri) }) {
+    private fun showRoots(focusUri: Uri? = null, focusDlna: SavedDlnaFolder? = null,
+        focusUsb: SavedUsbFolder? = null) {
+        load(retry = { showRoots(focusUri, focusDlna, focusUsb) }) {
             val roots = withContext(Dispatchers.IO) {
                 // Keep disconnected/revoked roots selectable so their error offers retry/add.
                 val folders = grantedTrees().map { tree ->
@@ -137,6 +139,13 @@ class SafFileBrowser(
             }
             val dlna = savedFolders.all().sortedBy { it.serverName + it.title }
             val usb = DlnaFolderSorter.sort(savedUsbFolders.all()) { it.title }
+            val explicitSelection = when {
+                focusDlna != null -> dlna.indexOfFirst {
+                    it.serverId == focusDlna.serverId && it.folderId == focusDlna.folderId
+                }.takeIf { it >= 0 }?.let { roots.size + it }
+                focusUsb != null -> usb.indexOf(focusUsb).takeIf { it >= 0 }?.let { roots.size + dlna.size + it }
+                else -> null
+            }
             showDialog(DlnaDialogContent(
                 title = activity.getString(R.string.saf_choose_folder),
                 label = null,
@@ -150,7 +159,7 @@ class SafFileBrowser(
                         detail = "${activity.getString(R.string.saved_folder_usb)} · ${it.directoryPath}")
                 },
                 message = activity.getString(R.string.saf_no_folder),
-                initialSelection = lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri, usb),
+                initialSelection = explicitSelection ?: lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri, usb),
                 refreshLabel = R.string.saf_add_folder,
                 onRefresh = { addFolder() },
                 onClose = { cancel() },

@@ -96,7 +96,7 @@ class PlaybackSelectionTest {
 
     @Test fun differentFileSelectionStartsNewSessionAtZero() = checkNewSelection("D01 OP", 0)
 
-    @Test fun cancelDlnaDiscoveryAfterSwitchingSourcesRestoresOriginalSession() = withPlayback { scenario, fixture ->
+    @Test fun cancelDlnaAdditionReturnsToSavedListBeforeRestoringOriginalSession() = withPlayback { scenario, fixture ->
         val original = openSelection(scenario, fixture, paused = false)
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         action(scenario, fixture.directory.name, R.id.dlna_up)
@@ -113,8 +113,11 @@ class PlaybackSelectionTest {
             list.performItemClick(null, index, list.adapter.getItemId(index))
             assertSame(original, fixture.playerView.player)
             assertFalse(original.playWhenReady)
-            window(context.getString(R.string.dlna_dialog_label))!!.findViewById<View>(R.id.dlna_close).performClick()
+            window(context.getString(R.string.saf_add_folder))!!.findViewById<View>(R.id.dlna_close).performClick()
         }
+        waitForTitle(R.string.saf_choose_folder)
+        scenario.onActivity { assertSame(original, fixture.playerView.player);assertFalse(original.playWhenReady) }
+        action(scenario, context.getString(R.string.saf_choose_folder), R.id.dlna_close)
         BrowserTestUi.waitUntil { original.playWhenReady }
         scenario.onActivity {
             assertSame(original, fixture.playerView.player)

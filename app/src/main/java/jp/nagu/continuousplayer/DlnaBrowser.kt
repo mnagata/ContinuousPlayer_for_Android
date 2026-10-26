@@ -21,6 +21,8 @@ class DlnaBrowser(
 ) {
     private val savedFolders = SavedDlnaFolders(activity)
     private var returnToSavedFolders: (() -> Unit)? = null
+    private var registering = false
+    private var onRegistered: ((SavedDlnaFolder) -> Unit)? = null
     private val scanner = VideoScanner()
     private var servers = emptyList<DlnaServer>()
     private var dialog: DlnaSelectionDialog? = null
@@ -34,19 +36,24 @@ class DlnaBrowser(
         dialog?.dismiss()
         dialog = null
         returnToSavedFolders = null
-        directoryContent = null
+        registering = false
+        onRegistered = null
     }
 
     private fun cancel() {
-        close()
-        onCancelled()
+        if (registering && returnToSavedFolders != null) returnToSaved()
+        else {
+            close()
+            onCancelled()
+        }
     }
 
     internal fun takeDialog(): DlnaSelectionDialog? {
         job?.cancel()
         job = null
         returnToSavedFolders = null
-        directoryContent = null
+        registering = false
+        onRegistered = null
         return dialog.also { dialog = null }
     }
 
@@ -56,14 +63,31 @@ class DlnaBrowser(
     }
 
     fun open() {
-        returnToSavedFolders = null
-        load(R.string.dlna_searching, retry = { open() }) {
+        close()
+        registering = true
+        refreshServers()
+    }
+
+    internal fun openForRegistration(inheritedDialog: DlnaSelectionDialog?,
+        onRegistered: (SavedDlnaFolder) -> Unit, onReturn: () -> Unit) {
+        close()
+        dialog = inheritedDialog
+        registering = true
+        this.onRegistered = onRegistered
+        returnToSavedFolders = onReturn
+        refreshServers()
+    }
+
+    private fun refreshServers() {
+        load(R.string.dlna_searching, retry = { refreshServers() }) {
             servers = discoverServers()
             showServers()
         }
     }
 
     fun openSaved(folder: SavedDlnaFolder, focusMediaId: String? = null, onReturn: () -> Unit) {
+        registering = false
+        onRegistered = null
         returnToSavedFolders = onReturn
         load(R.string.dlna_searching, retry = { openSaved(folder, focusMediaId, onReturn) }) {
             servers = discoverServers()
@@ -107,7 +131,9 @@ class DlnaBrowser(
                 detail = activity.getString(R.string.dlna_server_detail, java.net.URI(it.controlUrl).host)) },
             message = activity.getString(R.string.dlna_no_server),
             initialSelection = servers.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
-            onRefresh = { open() },
+            upLabel = R.string.saved_folder_list,
+            onUp = if (returnToSavedFolders != null) ({ returnToSaved() }) else null,
+            onRefresh = { refreshServers() },
             onClose = { cancel() },
             onSelected = { index ->
                 val server = servers[index]
@@ -120,8 +146,6 @@ class DlnaBrowser(
             showDirectory(server, path, focusId)
         }
     }
-
-    private var directoryContent: DlnaDialogContent? = null
 
     private suspend fun showDirectory(server: DlnaServer, path: List<DlnaEntry>, focusId: String? = null) {
         val entries = withContext(Dispatchers.IO) { client.browse(server, path.last().id) }
@@ -147,13 +171,12 @@ class DlnaBrowser(
             message = activity.getString(R.string.dlna_empty),
             initialSelection = if (mediaSelection >= 0) folders.size + mediaSelection
                 else folders.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
-            upLabel = if (path.size > 1) R.string.usb_parent else if (returnToSavedFolders != null)
+            upLabel = if (path.size > 1) R.string.usb_parent else if (!registering && returnToSavedFolders != null)
                 R.string.saved_folder_list else R.string.dlna_server_list,
             onUp = { parent(server, path) },
             onRefresh = { browse(server, path) },
-            registerLabel = if (savedFolders.contains(server.id, path.last().id))
-                R.string.folder_unregister else R.string.folder_register,
-            onRegister = if (returnToSavedFolders == null) ({ toggleSavedFolder(server, path) }) else null,
+            registerLabel = R.string.folder_register,
+            onRegister = if (registering) ({ registerFolder(server, path) }) else null,
             onClose = { cancel() },
             onSelected = { index ->
                 when {
@@ -166,23 +189,19 @@ class DlnaBrowser(
                     }
                 }
             })
-        directoryContent = content
         showDialog(content)
     }
 
-    private fun toggleSavedFolder(server: DlnaServer, path: List<DlnaEntry>) {
-        val removing = savedFolders.contains(server.id, path.last().id)
-        if (removing) savedFolders.remove(server.id, path.last().id)
-        else savedFolders.save(server, path)
-        android.widget.Toast.makeText(activity,
-            if (removing) R.string.folder_unregistered else R.string.folder_registered,
-            android.widget.Toast.LENGTH_SHORT).show()
-        directoryContent?.copy(registerLabel = if (removing) R.string.folder_register else R.string.folder_unregister)
-            ?.let { directoryContent = it; showDialog(it) }
+    private fun registerFolder(server: DlnaServer, path: List<DlnaEntry>) {
+        savedFolders.save(server, path)
+        val registered = SavedDlnaFolder(server.id, server.name, path.map { SavedDlnaPath(it.id, it.title) })
+        android.widget.Toast.makeText(activity, R.string.folder_registered, android.widget.Toast.LENGTH_SHORT).show()
+        onRegistered?.invoke(registered)
+        close()
     }
 
     private fun parent(server: DlnaServer, path: List<DlnaEntry>) {
-        if (path.size == 1 && returnToSavedFolders != null) returnToSaved()
+        if (path.size == 1 && !registering && returnToSavedFolders != null) returnToSaved()
         else if (path.size == 1) showServers(server.id)
         else browse(server, path.dropLast(1), path.last().id)
     }

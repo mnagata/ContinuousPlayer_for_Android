@@ -24,6 +24,8 @@ class UsbFileBrowser(
 ) {
     private var dialog: DlnaSelectionDialog? = null
     private var job: Job? = null
+    private var onRegistered: ((SavedUsbFolder) -> Unit)? = null
+    private var returnFromRegistration: (() -> Unit)? = null
     internal var selectedFolder: PlaybackFolder.Usb? = null
         private set
     private val playbackBrowser = UsbPlaybackBrowser(activity, onCancelled) { folder, videos, index ->
@@ -64,11 +66,28 @@ class UsbFileBrowser(
         job = null
         dialog?.dismiss()
         dialog = null
+        onRegistered = null
+        returnFromRegistration = null
     }
 
     private fun cancel() {
+        val onReturn = returnFromRegistration
+        if (onReturn != null) {
+            onReturn()
+            close()
+        } else {
+            close()
+            onCancelled()
+        }
+    }
+
+    internal fun openForRegistration(inheritedDialog: DlnaSelectionDialog?,
+        onRegistered: (SavedUsbFolder) -> Unit, onReturn: () -> Unit) {
         close()
-        onCancelled()
+        dialog = inheritedDialog
+        this.onRegistered = onRegistered
+        returnFromRegistration = onReturn
+        openStorage(restoreDirectory = true)
     }
 
     fun open() {
@@ -154,7 +173,8 @@ class UsbFileBrowser(
                     SavedUsbFolders(activity).save(root, directory)
                     android.widget.Toast.makeText(activity, R.string.folder_registered,
                         android.widget.Toast.LENGTH_SHORT).show()
-                    onFolderSelected()
+                    val registered = SavedUsbFolder(root.canonicalPath, directory.canonicalPath)
+                    onRegistered?.invoke(registered) ?: onFolderSelected()
                     close()
                 },
                 onClose = { cancel() },

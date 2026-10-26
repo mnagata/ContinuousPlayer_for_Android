@@ -165,7 +165,10 @@ class DlnaSavedFolderTest {
             val folder = store.all().single()
             assertEquals("opaque-folder", folder.folderId)
             assertEquals(listOf("0", "opaque-folder"), folder.path.map { it.id })
-            BrowserTestUi.waitForText(R.string.folder_unregister)
+            assertTrue(selection.isEmpty())
+            BrowserTestUi.waitUntil { android.view.inspector.WindowInspector.getGlobalWindowViews().none {
+                it.findViewById<android.view.View>(R.id.dlna_title) != null
+            } }
             scenario.onActivity {
                 browser.close()
                 client.server = client.server.copy(controlUrl = "http://192.0.2.2/control")

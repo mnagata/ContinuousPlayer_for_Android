@@ -163,7 +163,11 @@ class MainActivity : AppCompatActivity() {
         }
         safBrowser = SafFileBrowser(this,
             onAddFolder = { launchTreePicker() },
-            onAddDlna = { dlnaBrowser.open() },
+            onAddDlna = {
+                dlnaBrowser.openForRegistration(safBrowser.takeDialog(),
+                    onRegistered = { folder -> safBrowser.openSavedFolders(dlnaBrowser.takeDialog(), focusDlna = folder) },
+                    onReturn = { safBrowser.openSavedFolders(dlnaBrowser.takeDialog()) })
+            },
             onDlnaFolder = { folder ->
                 dlnaBrowser.openSaved(folder, safBrowser.takeDialog()) {
                     safBrowser.openSavedFolders(dlnaBrowser.takeDialog())
@@ -533,7 +537,9 @@ class MainActivity : AppCompatActivity() {
     private fun openUsbBrowser() {
         val folder = pendingUsbFolder
         pendingUsbFolder = null
-        if (folder == null) usbBrowser.open()
+        if (folder == null) usbBrowser.openForRegistration(safBrowser.takeDialog(),
+            onRegistered = { registered -> safBrowser.openSavedFolders(usbBrowser.takeDialog(), focusUsb = registered) },
+            onReturn = { safBrowser.openSavedFolders(usbBrowser.takeDialog()) })
         else usbBrowser.openSaved(folder, safBrowser.takeDialog()) {
             safBrowser.openSavedFolders(usbBrowser.takeDialog())
         }
@@ -581,8 +587,10 @@ class MainActivity : AppCompatActivity() {
         } catch (error: SecurityException) {
             Log.w(TAG, "Folder access could not be persisted", error)
             Toast.makeText(this, R.string.saf_permission_not_saved, Toast.LENGTH_LONG).show()
+            return
         }
-        safBrowser.open(treeUri)
+        Toast.makeText(this, R.string.folder_registered, Toast.LENGTH_SHORT).show()
+        safBrowser.folderRegistered(treeUri)
     }
 
     @SuppressLint("ClickableViewAccessibility")
