@@ -3,6 +3,7 @@ package jp.nagu.continuousplayer
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -72,6 +73,37 @@ class PlayerController(
         transportPlayer.restorePosition(mediaIndex, positionMs, wasCompleted)
     }
 
+    private val positionHandler = Handler(engine.applicationLooper)
+    private var confirmedIndex = C.INDEX_UNSET
+    private var confirmedItem: MediaItem? = null
+    private var confirmedPositionMs = 0L
+
+    // A failed loader may reset the exposed position. Only healthy READY samples
+    // replace the last confirmed position, including completed seeks while paused.
+    internal val lastConfirmedPositionMs: Long
+        get() = if (confirmedIndex == player.currentMediaItemIndex && confirmedItem == player.currentMediaItem)
+            confirmedPositionMs else 0L
+
+    private fun confirmPosition() {
+        if (player.playerError == null && player.playbackState == Player.STATE_READY) {
+            confirmedIndex = player.currentMediaItemIndex
+            confirmedItem = player.currentMediaItem
+            confirmedPositionMs = player.currentPosition.coerceAtLeast(0)
+        }
+    }
+
+    private val positionSampler = object : Runnable {
+        override fun run() {
+            confirmPosition()
+            positionHandler.postDelayed(this, 250L)
+        }
+    }
+
+    /** Explicit error recovery bypasses unavailable seek commands on a failed timeline. */
+    internal fun recoverPlayback(mediaIndex: Int, positionMs: Long) {
+        transportPlayer.recover(mediaIndex, positionMs)
+    }
+
     val videoFormat get() = engine.videoFormat
     val audioFormat get() = engine.audioFormat
 
@@ -125,6 +157,16 @@ class PlayerController(
     }
 
     private val errorListener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) { confirmPosition() }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (confirmedIndex != player.currentMediaItemIndex || confirmedItem != mediaItem) {
+                confirmedIndex = C.INDEX_UNSET
+                confirmedItem = null
+                confirmedPositionMs = 0L
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             Log.e(TAG, "Playback failed: ${error.errorCodeName}", error)
             // Apply the stop policy even when no UI callback is installed.
@@ -135,6 +177,7 @@ class PlayerController(
 
     init {
         player.addListener(errorListener)
+        positionHandler.post(positionSampler)
         }
 
         /**
@@ -202,6 +245,7 @@ class PlayerController(
 
         /** プレーヤーおよびMediaSessionのリソースを解放する。 */
     fun release() {
+        positionHandler.removeCallbacks(positionSampler)
         audioMonitor.release()
         player.removeListener(errorListener)
         mediaSession.release()

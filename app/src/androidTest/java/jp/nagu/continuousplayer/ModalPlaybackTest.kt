@@ -148,7 +148,7 @@ class ModalPlaybackTest {
         scenario.onActivity { sendModernMutations(remote, fixture) }
         for (key in mediaKeys) stroke(key)
         assertRetained(scenario, fixture)
-        scenario.onActivity { errorWindow()!!.findViewById<View>(android.R.id.button3).performClick() }
+        scenario.onActivity { errorWindow()!!.findViewById<View>(R.id.error_close).performClick() }
         BrowserTestUi.waitUntil { remote.isCommandAvailable(Player.COMMAND_PLAY_PAUSE) }
         scenario.onActivity { remote.seekTo(20_000) }
         BrowserTestUi.waitUntil { fixture.player.currentPosition == 20_000L }
@@ -266,7 +266,7 @@ class ModalPlaybackTest {
     }
     private fun infoWindow() = WindowInspector.getGlobalWindowViews().singleOrNull { it.findViewById<View>(R.id.info_close) != null }
     private fun fileWindow() = WindowInspector.getGlobalWindowViews().singleOrNull { it.findViewById<View>(R.id.dlna_list) != null }
-    private fun errorWindow() = WindowInspector.getGlobalWindowViews().singleOrNull { it.findViewById<TextView>(android.R.id.button1)?.text == InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.playback_retry) }
+    private fun errorWindow() = WindowInspector.getGlobalWindowViews().singleOrNull { it.findViewById<View>(R.id.error_retry) != null }
 
     private fun connect(scenario: ActivityScenario<MainActivity>, fixture: Fixture): MediaController {
         lateinit var future: ListenableFuture<MediaController>

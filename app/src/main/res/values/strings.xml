@@ -36,7 +36,11 @@
     <string name="usb_read_error">USBを読み取れません。接続状態とアクセス許可を確認してください。</string>
     <string name="playback_failed">再生できませんでした</string>
     <string name="playback_retry">再試行</string>
-    <string name="playback_choose_another">別のファイルを選ぶ</string>
+    <string name="playback_error_close">閉じる</string>
+    <string name="playback_permission_recovery">ファイルを読み取る権限がありません。ファイル一覧から元のフォルダーへのアクセスを再度許可して選び直してください。</string>
+    <string name="playback_network_recovery">サーバーからファイルを読み取れません。ネットワークとサーバーの接続を確認し、再接続してから再試行してください。</string>
+    <string name="playback_storage_recovery">元のファイルを読み取れません。USBなどのストレージを再接続し、ファイルの存在とアクセス許可を確認してから再試行してください。再許可が必要な場合は、ファイル一覧からフォルダーを選び直してください。</string>
+    <string name="playback_media_recovery">ファイルを再生できません。ファイルの破損や対応形式を確認してください。再試行するか、ファイル一覧から別のファイルを選んでください。</string>
     <string name="playback_source_unavailable">元のファイルにアクセスできません。ストレージの接続とアクセス許可を確認し、必要ならファイルを選び直してください。</string>
     <string name="dlna_select">NAS / DLNAから選ぶ</string>
     <string name="dlna_choose_source">再生元を選ぶ</string>

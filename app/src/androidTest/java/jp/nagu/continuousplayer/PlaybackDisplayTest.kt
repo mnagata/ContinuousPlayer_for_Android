@@ -166,7 +166,7 @@ class PlaybackDisplayTest {
     @Test fun closingTvErrorDialogLeavesVisibleControls() = withPlayback(broken = true, tv = true) { scenario, fixture ->
         lateinit var dialog: AlertDialog
         BrowserTestUi.waitUntil { errorDialog(scenario)?.window?.decorView?.hasWindowFocus() == true }
-        scenario.onActivity { dialog = errorDialogOnMain(it)!!;dialog.getButton(AlertDialog.BUTTON_NEUTRAL).performClick() }
+        scenario.onActivity { dialog = errorDialogOnMain(it)!!;dialog.findViewById<View>(R.id.error_close)!!.performClick() }
         BrowserTestUi.waitUntil { fixture.playerView.rootView.hasWindowFocus() }
         scenario.onActivity { assertTrue(fixture.overlay.isShown);assertNotNull(fixture.player.playerError);assertTrue(it.findViewById<View>(R.id.btn_overlay_play_pause).hasFocus()) }
     }
@@ -244,7 +244,7 @@ class PlaybackDisplayTest {
     private fun infoWindow() = WindowInspector.getGlobalWindowViews().singleOrNull { it.findViewById<View>(R.id.info_close) != null }
     private fun dismissError(scenario: ActivityScenario<MainActivity>, fixture: Fixture) {
         BrowserTestUi.waitUntil { errorDialog(scenario)?.window?.decorView?.hasWindowFocus() == true }
-        scenario.onActivity { errorDialogOnMain(it)!!.getButton(AlertDialog.BUTTON_NEUTRAL).performClick() }
+        scenario.onActivity { errorDialogOnMain(it)!!.findViewById<View>(R.id.error_close)!!.performClick() }
         BrowserTestUi.waitUntil { fixture.playerView.rootView.hasWindowFocus() }
     }
     private fun errorDialogOnMain(activity: MainActivity) = MainActivity::class.java.getDeclaredField("playbackErrorDialog").apply { isAccessible = true }.get(activity) as? AlertDialog

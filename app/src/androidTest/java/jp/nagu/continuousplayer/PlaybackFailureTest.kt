@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.DocumentsContract
+import android.view.KeyEvent
 import android.view.View
 import android.view.inspector.WindowInspector
 import android.widget.ListView
@@ -19,6 +20,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
@@ -64,12 +66,20 @@ class PlaybackFailureTest {
         scenario.onActivity {
             assertStopped(f)
             val dialog = errorDialog(it)!!
-            val text = dialog.findViewById<TextView>(android.R.id.message)!!.text.toString()
+            val text = dialog.findViewById<TextView>(R.id.error_filename)!!.text.toString() + dialog.findViewById<TextView>(R.id.error_details)!!.text
             assertTrue(text.contains(f.videos[1].displayName))
             assertTrue(text.contains(f.player.playerError!!.errorCodeName))
-            assertNotNull(dialog.getButton(AlertDialog.BUTTON_POSITIVE))
-            assertNotNull(dialog.getButton(AlertDialog.BUTTON_NEGATIVE))
-            assertNotNull(dialog.getButton(AlertDialog.BUTTON_NEUTRAL))
+            for (id in listOf(R.id.error_retry, R.id.error_next, R.id.error_file_list, R.id.error_close)) {
+                assertTrue(dialog.findViewById<View>(id)!!.isShown)
+            }
+            assertEquals(R.id.error_retry, dialog.currentFocus!!.id)
+            val reason = when (kind) {
+                Kind.DENIED -> R.string.playback_permission_recovery
+                Kind.MISSING, Kind.CONTENT -> R.string.playback_storage_recovery
+                Kind.HTTP -> R.string.playback_network_recovery
+                Kind.CORRUPT -> R.string.playback_media_recovery
+            }
+            assertEquals(it.getString(reason), dialog.findViewById<TextView>(R.id.error_reason)!!.text.toString())
         }
         SystemClock.sleep(300)
         scenario.onActivity { assertStopped(f) }
@@ -87,7 +97,7 @@ class PlaybackFailureTest {
             lateinit var previous: AlertDialog
             scenario.onActivity { activity ->
                 previous = errorDialog(activity)!!
-                previous.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                previous.findViewById<View>(R.id.error_retry)!!.performClick()
             }
             BrowserTestUi.waitUntil { errorDialog(scenario)?.let { it !== previous && it.window?.decorView?.hasWindowFocus() == true } == true }
             scenario.onActivity { assertStopped(f) }
@@ -96,7 +106,7 @@ class PlaybackFailureTest {
 
     @Test fun closingErrorLeavesTheSamePlayerQueueAndFailurePaused() = withPlayback { scenario, f ->
         awaitError(scenario)
-        scenario.onActivity { errorDialog(it)!!.getButton(AlertDialog.BUTTON_NEUTRAL).performClick() }
+        scenario.onActivity { errorDialog(it)!!.findViewById<View>(R.id.error_close)!!.performClick() }
         BrowserTestUi.waitUntil { errorDialog(scenario) == null && f.view.rootView.hasWindowFocus() }
         SystemClock.sleep(350)
         scenario.onActivity {
@@ -113,7 +123,7 @@ class PlaybackFailureTest {
         f.http.available.set(true)
         SystemClock.sleep(600)
         scenario.onActivity { assertStopped(f);assertEquals(requests, f.http.requests.get()) }
-        scenario.onActivity { errorDialog(it)!!.getButton(AlertDialog.BUTTON_POSITIVE).performClick() }
+        scenario.onActivity { errorDialog(it)!!.findViewById<View>(R.id.error_retry)!!.performClick() }
         BrowserTestUi.waitUntil { f.player.isPlaying }
         scenario.onActivity { assertEquals(1, f.player.currentMediaItemIndex);assertSame(f.player, f.view.player) }
     }
@@ -232,9 +242,228 @@ class PlaybackFailureTest {
         } finally { directory.deleteRecursively() }
     }
 
+    @Test fun retryAfterFailureBeforeStartBeginsAtZero() = withPlayback(Kind.HTTP) { scenario, f ->
+        awaitError(scenario)
+        scenario.onActivity {
+            assertEquals(0L, owner(it).lastConfirmedPositionMs)
+            f.http!!.available.set(true)
+            errorDialog(it)!!.findViewById<View>(R.id.error_retry)!!.performClick()
+            assertEquals(0L, f.player.currentPosition)
+        }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+    }
+
+    @Test fun retryRestoresConfirmedPositionEvenWhenFailedEnginePositionChanges() = checkPositionRecovery()
+    @Test fun tvRetryRestoresConfirmedPosition() = checkPositionRecovery(tv = true)
+    private fun checkPositionRecovery(tv: Boolean = false) = withPlayback(validFirst = true, tv = tv) { scenario, f ->
+        lateinit var failing: AtomicBoolean
+        var confirmed = 0L
+        scenario.onActivity { f.player.pause() }
+        BrowserTestUi.waitUntil { f.owner.lastConfirmedPositionMs >= 30_000L }
+        scenario.onActivity { confirmed = owner(it).lastConfirmedPositionMs;failing = injectFailure(f) }
+        awaitError(scenario)
+        scenario.onActivity {
+            assertEquals(confirmed, owner(it).lastConfirmedPositionMs)
+            // Simulate a loader/timeline losing its reported position after the failure.
+            f.engine.seekTo(1, 0)
+        }
+        BrowserTestUi.waitUntil { f.player.currentPosition == 0L }
+        scenario.onActivity {
+            failing.set(false)
+            errorDialog(it)!!.findViewById<View>(R.id.error_retry)!!.performClick()
+            assertEquals(confirmed, f.player.currentPosition)
+            assertSame(f.player, f.view.player);assertEquals(1, f.player.currentMediaItemIndex)
+        }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+        scenario.onActivity { assertNull(f.player.playerError);assertTrue(f.player.currentPosition >= confirmed) }
+    }
+
+    @Test fun repeatedFailedRetryKeepsConfirmedPosition() = withPlayback(validFirst = true) { scenario, f ->
+        scenario.onActivity { f.player.pause() }
+        BrowserTestUi.waitUntil { f.owner.lastConfirmedPositionMs >= 30_000L }
+        var position = 0L
+        scenario.onActivity { position = owner(it).lastConfirmedPositionMs;injectFailure(f) }
+        awaitError(scenario)
+        repeat(3) {
+            lateinit var previous: AlertDialog
+            scenario.onActivity {
+                previous = errorDialog(it)!!
+                previous.findViewById<View>(R.id.error_retry)!!.performClick()
+                assertEquals(position, f.player.currentPosition)
+            }
+            BrowserTestUi.waitUntil { errorDialog(scenario)?.let { it !== previous && it.window?.decorView?.hasWindowFocus() == true } == true }
+            scenario.onActivity { assertStopped(f);assertEquals(position, owner(it).lastConfirmedPositionMs) }
+        }
+    }
+
+    @Test fun explicitNextStartsAtZeroOnSameQueueAndPlayer() = checkExplicitNext()
+    @Test fun tvExplicitNextStartsAtZero() = checkExplicitNext(tv = true)
+    private fun checkExplicitNext(tv: Boolean = false) = withPlayback(tv = tv) { scenario, f ->
+        awaitError(scenario)
+        scenario.onActivity {
+            errorDialog(it)!!.findViewById<View>(R.id.error_next)!!.performClick()
+            assertSame(f.player, f.view.player);assertEquals(2, f.player.currentMediaItemIndex)
+            assertEquals(0L, f.player.currentPosition);assertEquals(3, f.player.mediaItemCount)
+        }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+        scenario.onActivity { assertNull(f.player.playerError);assertNull(errorDialog(it)) }
+    }
+
+    @Test fun lastItemFailureHidesNextAction() = withPlayback(startIndex = 2) { scenario, _ ->
+        awaitError(scenario)
+        scenario.onActivity { assertEquals(View.GONE, errorDialog(it)!!.findViewById<View>(R.id.error_next)!!.visibility) }
+    }
+
+    @Test fun errorFileListOpensOriginalFolderAndCancelKeepsFailedSession() = withPlayback { scenario, f ->
+        awaitError(scenario)
+        scenario.onActivity { errorDialog(it)!!.findViewById<View>(R.id.error_file_list)!!.performClick() }
+        BrowserTestUi.waitUntil { fileWindow()?.hasWindowFocus() == true && fileWindow()!!.findViewById<ListView>(R.id.dlna_list).count == 3 }
+        scenario.onActivity {
+            assertStopped(f)
+            val rows = fileWindow()!!.findViewById<ListView>(R.id.dlna_list)
+            assertTrue((0 until rows.count).all { (rows.getItemAtPosition(it) as DlnaRow).title.contains("D25 Episode") })
+            fileWindow()!!.findViewById<View>(R.id.dlna_close).performClick()
+        }
+        BrowserTestUi.waitUntil { fileWindow() == null && f.view.rootView.hasWindowFocus() }
+        scenario.onActivity { assertStopped(f);assertNull(errorDialog(it)) }
+    }
+
+    @Test fun errorFileListSelectionStartsChosenFileAtZero() = withPlayback { scenario, f ->
+        awaitError(scenario)
+        scenario.onActivity { errorDialog(it)!!.findViewById<View>(R.id.error_file_list)!!.performClick() }
+        BrowserTestUi.waitUntil { fileWindow()?.hasWindowFocus() == true && fileWindow()!!.findViewById<ListView>(R.id.dlna_list).count == 3 }
+        scenario.onActivity {
+            val list = fileWindow()!!.findViewById<ListView>(R.id.dlna_list)
+            val index = (0 until list.count).first { (list.getItemAtPosition(it) as DlnaRow).title.contains("Episode 3") }
+            list.performItemClick(list.getChildAt(index), index, list.adapter.getItemId(index))
+        }
+        BrowserTestUi.waitUntil { f.view.player !== f.player && f.view.player?.isPlaying == true }
+        scenario.onActivity { assertEquals(2, f.view.player!!.currentMediaItemIndex);assertTrue(f.view.player!!.currentPosition < 2_000);assertNull(errorDialog(it)) }
+    }
+
+    @Test fun tvDecisionExecutesInitiallyFocusedRetry() = withPlayback(Kind.HTTP, tv = true) { scenario, f ->
+        awaitError(scenario)
+        f.http!!.available.set(true)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+            val now = SystemClock.uptimeMillis()
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(now, now, action, KeyEvent.KEYCODE_DPAD_CENTER, 0), true))
+        }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+        scenario.onActivity { assertEquals(1, f.player.currentMediaItemIndex);assertNull(errorDialog(it)) }
+    }
+
+    @Test fun largeFontLongFilenameKeepsAllErrorActionsReachable() = withPlayback(fontScale = 2f, longName = true) { scenario, _ ->
+        awaitError(scenario)
+        scenario.onActivity {
+            val dialog = errorDialog(it)!!
+            val title = dialog.findViewById<TextView>(R.id.error_filename)!!
+            assertTrue(title.lineCount > 1)
+            assertTrue((0 until title.lineCount).all { title.layout.getEllipsisCount(it) == 0 })
+        }
+        screenshot("large-font-error")
+        for (id in listOf(R.id.error_retry, R.id.error_next, R.id.error_file_list, R.id.error_close)) {
+            scenario.onActivity { errorDialog(it)!!.findViewById<View>(id)!!.requestFocus() }
+            SystemClock.sleep(300)
+            scenario.onActivity {
+                val button = errorDialog(it)!!.findViewById<TextView>(id)!!
+                val rect = android.graphics.Rect()
+                assertTrue(button.getGlobalVisibleRect(rect));assertEquals(button.height, rect.height())
+                assertTrue((0 until button.lineCount).all { button.layout.getEllipsisCount(it) == 0 })
+            }
+        }
+        screenshot("large-font-close")
+    }
+
+    @Test fun networkRetryAfterConfirmedPlaybackRestoresSameFilePosition() = withPlayback(Kind.HTTP, validFirst = true) { scenario, f ->
+        scenario.onActivity { f.player.pause() }
+        BrowserTestUi.waitUntil { f.owner.lastConfirmedPositionMs >= 30_000L }
+        var position = 0L
+        scenario.onActivity {
+            position = f.owner.lastConfirmedPositionMs
+            f.http!!.available.set(false)
+            // Reopen the actual HTTP source after the server becomes unavailable.
+            f.engine.stop()
+            f.engine.prepare()
+        }
+        awaitError(scenario)
+        val requests = f.http!!.requests.get()
+        SystemClock.sleep(400)
+        scenario.onActivity {
+            assertStopped(f);assertEquals(requests, f.http.requests.get())
+            assertEquals(position, f.owner.lastConfirmedPositionMs)
+            f.http.available.set(true)
+            errorDialog(it)!!.findViewById<View>(R.id.error_retry)!!.performClick()
+            assertEquals(position, f.player.currentPosition)
+        }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+        scenario.onActivity { assertEquals(1, f.player.currentMediaItemIndex);assertTrue(f.player.currentPosition >= position) }
+    }
+
+    @Test fun deferredErrorRetryKeepsPositionAfterInformationCloses() = withPlayback(validFirst = true) { scenario, f ->
+        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_info).performClick() }
+        BrowserTestUi.waitUntil { infoWindow()?.hasWindowFocus() == true }
+        var saved = 0L
+        lateinit var failing: AtomicBoolean
+        scenario.onActivity { saved = owner(it).lastConfirmedPositionMs;failing = injectFailure(f) }
+        BrowserTestUi.waitUntil { f.player.playerError != null }
+        scenario.onActivity { assertNull(errorDialog(it));infoWindow()!!.findViewById<View>(R.id.info_close).performClick() }
+        awaitError(scenario)
+        scenario.onActivity {
+            failing.set(false)
+            errorDialog(it)!!.findViewById<View>(R.id.error_retry)!!.performClick()
+            assertEquals(saved, f.player.currentPosition)
+        }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+    }
+
+    @Test fun closedDialogCannotRunItsRecoveryActionAgain() = withPlayback(Kind.HTTP) { scenario, f ->
+        awaitError(scenario)
+        lateinit var retry: View
+        scenario.onActivity {
+            retry = errorDialog(it)!!.findViewById(R.id.error_retry)!!
+            errorDialog(it)!!.findViewById<View>(R.id.error_close)!!.performClick()
+        }
+        BrowserTestUi.waitUntil { f.view.rootView.hasWindowFocus() }
+        val requests = f.http!!.requests.get()
+        f.http.available.set(true)
+        scenario.onActivity { retry.performClick() }
+        SystemClock.sleep(350)
+        scenario.onActivity { assertStopped(f);assertEquals(requests, f.http.requests.get()) }
+    }
+
+    @Test fun previousErrorActionCannotChangeNewPlaybackSession() = withPlayback { scenario, f ->
+        awaitError(scenario)
+        lateinit var retry: View
+        scenario.onActivity {
+            retry = errorDialog(it)!!.findViewById(R.id.error_retry)!!
+            MainActivity::class.java.getDeclaredMethod("startPlayback", List::class.java, Int::class.javaPrimitiveType)
+                .apply { isAccessible = true }.invoke(it, f.videos, 2)
+        }
+        BrowserTestUi.waitUntil { f.view.player !== f.player && f.view.player?.isPlaying == true }
+        scenario.onActivity {
+            val current = f.view.player
+            retry.performClick()
+            assertSame(current, f.view.player);assertEquals(2, current!!.currentMediaItemIndex);assertTrue(current.playWhenReady)
+        }
+    }
+
+    @Test fun positionIsPeriodicallyConfirmedWithoutPlayerEvents() = withPlayback(validFirst = true) { scenario, f ->
+        var before = 0L
+        scenario.onActivity { before = owner(it).lastConfirmedPositionMs }
+        SystemClock.sleep(1_000)
+        scenario.onActivity {
+            val after = owner(it).lastConfirmedPositionMs
+            assertTrue("Periodic samples must follow playback", after >= before + 500)
+            assertTrue("Confirmed position must stay close to actual playback", f.player.currentPosition - after in 0..1_000)
+        }
+    }
+
+    private fun owner(activity: MainActivity) = MainActivity::class.java.getDeclaredField("playerController").apply { isAccessible = true }.get(activity) as PlayerController
+
     private enum class Kind { CORRUPT, MISSING, CONTENT, DENIED, HTTP }
     private data class Fixture(val view: PlayerView, val player: Player, val engine: ExoPlayer,
-        val videos: List<VideoItem>, val session: MediaSession, val http: HttpFixture?)
+        val videos: List<VideoItem>, val session: MediaSession, val http: HttpFixture?, val owner: PlayerController)
     private fun assertStopped(f: Fixture, index: Int = 1) {
         assertSame(f.player, f.view.player);assertNotNull(f.player.playerError)
         assertFalse(f.player.playWhenReady);assertEquals(index, f.player.currentMediaItemIndex);assertEquals(3, f.player.mediaItemCount)
@@ -248,21 +477,24 @@ class PlaybackFailureTest {
         scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_select_folder).performClick() }
         BrowserTestUi.waitUntil { fileWindow()?.hasWindowFocus() == true && fileWindow()!!.findViewById<ListView>(R.id.dlna_list).count == 3 }
     }
-    private fun injectFailure(f: Fixture) {
+    private fun injectFailure(f: Fixture): AtomicBoolean {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val failing = AtomicBoolean(true)
+        val original = DefaultDataSource.Factory(context)
         val factory = DataSource.Factory {
-            object : DataSource {
-                override fun addTransferListener(listener: TransferListener) = Unit
-                override fun open(dataSpec: DataSpec): Long = throw IOException("D25 injected loader failure")
-                override fun read(buffer: ByteArray, offset: Int, length: Int): Int = throw IOException("D25 injected loader failure")
-                override fun getUri(): Uri? = null
-                override fun close() = Unit
+            val delegate = original.createDataSource()
+            object : DataSource by delegate {
+                override fun open(dataSpec: DataSpec): Long {
+                    if (failing.get()) throw IOException("D26 injected loader failure")
+                    return delegate.open(dataSpec)
+                }
             }
         }
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
         val sourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(factory).setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(0))
         val sources = f.videos.map { sourceFactory.createMediaSource(MediaItem.Builder().setUri(it.uri).setMimeType(it.mimeType).build()) }
         f.engine.setMediaSources(sources, 1, 30_000)
         f.engine.prepare()
+        return failing
     }
     private fun screenshot(name: String) {
         val instrumentation = InstrumentationRegistry.getInstrumentation();instrumentation.waitForIdleSync();SystemClock.sleep(600)
@@ -295,14 +527,14 @@ class PlaybackFailureTest {
         override fun close() { server.close();worker.join(2_500) }
     }
     private fun withPlayback(kind: Kind = Kind.CORRUPT, tv: Boolean = false, allBad: Boolean = false,
-        validFirst: Boolean = false, action: (ActivityScenario<MainActivity>, Fixture) -> Unit) {
+        validFirst: Boolean = false, startIndex: Int = 1, fontScale: Float? = null, longName: Boolean = false, action: (ActivityScenario<MainActivity>, Fixture) -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation();val context = instrumentation.targetContext
         val directory = File(context.cacheDir, "d25-error-fixture").apply { deleteRecursively();mkdirs() }
         val prefs = context.getSharedPreferences("last_playback_folder", Context.MODE_PRIVATE);val previous = prefs.all.toMap()
         val tree = ScrollFixtureProvider.tree
         val hadGrant = context.contentResolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission }
         val video = instrumentation.context.assets.open("d13-video.mp4").use { it.readBytes() }
-        val http = if (kind == Kind.HTTP) HttpFixture(video) else null
+        val http = if (kind == Kind.HTTP) HttpFixture(video).apply { available.set(validFirst) } else null
         val size = 8_000 * 2 * 90
         val wave = ByteBuffer.allocate(44 + size).order(ByteOrder.LITTLE_ENDIAN).put("RIFF".toByteArray()).putInt(36 + size)
             .put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(8_000).putInt(16_000)
@@ -315,15 +547,16 @@ class PlaybackFailureTest {
                 BrowserTestUi.waitUntil { runCatching { context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }.isSuccess }
             }
             val videos = (0..2).map { index ->
-                val broken = allBad || (!validFirst && index == 1)
+                val broken = allBad || (!validFirst && index == startIndex)
                 val file = File(directory, "D25 Episode ${index + 1}.${if (broken) "mp4" else "wav"}")
                 if (broken) { if (kind != Kind.MISSING) file.writeText("invalid media") } else file.writeBytes(wave)
-                val uri = if (!broken) file.toURI().toString() else when (kind) {
+                val httpMedia = kind == Kind.HTTP && index == startIndex && !allBad
+                val uri = if (httpMedia) http!!.uri else if (!broken) file.toURI().toString() else when (kind) {
                     Kind.HTTP -> http!!.uri
                     Kind.CONTENT, Kind.DENIED -> DocumentsContract.buildDocumentUriUsingTree(tree, if (kind == Kind.DENIED) "d25-denied" else "media").toString()
                     else -> file.toURI().toString()
                 }
-                VideoItem(uri, file.name, if (file.exists()) file.length() else -1, 0, if (broken) "video/mp4" else "audio/wav")
+                VideoItem(uri, if (longName) "長いファイル名の折り返し確認".repeat(8) + file.name else file.name, if (file.exists()) file.length() else -1, 0, if (broken || httpMedia) "video/mp4" else "audio/wav")
             }
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 lateinit var view: PlayerView;lateinit var configuration: Configuration
@@ -331,20 +564,23 @@ class PlaybackFailureTest {
                 instrumentation.setInTouchMode(false)
                 BrowserTestUi.waitUntil { view.rootView.hasWindowFocus() && view.rootView.isLaidOut }
                 scenario.onActivity {
-                    if (tv) {
-                        val tvConfig = Configuration(configuration).apply { uiMode = (uiMode and Configuration.UI_MODE_TYPE_MASK.inv()) or Configuration.UI_MODE_TYPE_TELEVISION }
+                    if (tv || fontScale != null) {
+                        val tvConfig = Configuration(configuration).apply {
+                            if (tv) uiMode = (uiMode and Configuration.UI_MODE_TYPE_MASK.inv()) or Configuration.UI_MODE_TYPE_TELEVISION
+                            if (fontScale != null) this.fontScale = fontScale
+                        }
                         @Suppress("DEPRECATION")
                         it.resources.updateConfiguration(tvConfig, it.resources.displayMetrics)
                     }
                     ViewModelProvider(it)[PlayerViewModel::class.java].apply { this.videos = videos;playbackFolder = PlaybackFolder.Usb(directory, directory) }
-                    MainActivity::class.java.getDeclaredMethod("startPlayback", List::class.java, Int::class.javaPrimitiveType).apply { isAccessible = true }.invoke(it, videos, if (allBad) 0 else 1)
+                    MainActivity::class.java.getDeclaredMethod("startPlayback", List::class.java, Int::class.javaPrimitiveType).apply { isAccessible = true }.invoke(it, videos, if (allBad) 0 else startIndex)
                 }
                 lateinit var f: Fixture
                 scenario.onActivity {
                     val owner = MainActivity::class.java.getDeclaredField("playerController").apply { isAccessible = true }.get(it) as PlayerController
                     val engine = PlayerController::class.java.getDeclaredField("engine").apply { isAccessible = true }.get(owner) as ExoPlayer
                     val session = PlayerController::class.java.getDeclaredField("mediaSession").apply { isAccessible = true }.get(owner) as MediaSession
-                    f = Fixture(view, owner.player, engine, videos, session, http)
+                    f = Fixture(view, owner.player, engine, videos, session, http, owner)
                 }
                 if (validFirst) {
                     BrowserTestUi.waitUntil { f.player.isPlaying }
@@ -352,7 +588,7 @@ class PlaybackFailureTest {
                     BrowserTestUi.waitUntil { f.player.playbackState == Player.STATE_READY }
                 } else BrowserTestUi.waitUntil { f.player.playerError != null && !f.player.playWhenReady }
                 try { action(scenario, f) } finally {
-                    if (tv) scenario.onActivity {
+                    if (tv || fontScale != null) scenario.onActivity {
                         @Suppress("DEPRECATION")
                         it.resources.updateConfiguration(configuration, it.resources.displayMetrics)
                     }

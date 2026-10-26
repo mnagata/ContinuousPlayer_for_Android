@@ -80,7 +80,8 @@ class MainActivity : AppCompatActivity() {
         val controller: PlayerController,
         val error: androidx.media3.common.PlaybackException,
         val mediaIndex: Int,
-        val mediaItem: androidx.media3.common.MediaItem?
+        val mediaItem: androidx.media3.common.MediaItem?,
+        val positionMs: Long
     )
     private val playbackModalDialogs = mutableSetOf<AlertDialog>()
     private var userPaused = false
@@ -752,7 +753,7 @@ class MainActivity : AppCompatActivity() {
         userPaused = true
         controller.player.pause()
         pendingPlaybackError = PendingPlaybackError(controller, error,
-            controller.player.currentMediaItemIndex, controller.player.currentMediaItem)
+            controller.player.currentMediaItemIndex, controller.player.currentMediaItem, controller.lastConfirmedPositionMs)
         updatePauseOverlay()
         presentPendingPlaybackError()
     }
@@ -769,34 +770,50 @@ class MainActivity : AppCompatActivity() {
             playbackSelection != null || playbackInformation != null || playbackModalDialogs.isNotEmpty()) return
         pendingPlaybackError = null
         val player = controller.player
-        val error = pending.error
-        val filename = viewModel.videos.getOrNull(player.currentMediaItemIndex)?.displayName.orEmpty()
-        val details = buildString {
-            appendLine(filename)
-            appendLine()
-            appendLine("${error.errorCodeName} (${error.errorCode})")
-            var cause: Throwable? = error
-            repeat(5) {
-                val current = cause ?: return@repeat
-                appendLine("${current.javaClass.simpleName}: ${current.message.orEmpty()}")
-                cause = current.cause
-            }
-        }.trim()
-        playbackErrorDialog?.dismiss()
-        playbackErrorDialog = AlertDialog.Builder(this)
+        val content = layoutInflater.inflate(R.layout.dialog_playback_error, null)
+        content.findViewById<TextView>(R.id.error_filename).text =
+            viewModel.videos.getOrNull(pending.mediaIndex)?.displayName.orEmpty()
+        content.findViewById<TextView>(R.id.error_reason).setText(playbackErrorGuidance(pending.error, pending.mediaItem))
+        content.findViewById<TextView>(R.id.error_details).text =
+            "${pending.error.errorCodeName} (${pending.error.errorCode})"
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.playback_failed)
-            .setMessage(details)
-            .setPositiveButton(R.string.playback_retry) { _, _ ->
-                player.prepare()
-                player.play()
-            }
-            .setNegativeButton(R.string.playback_choose_another) { _, _ ->
-                stopPlayback()
-                showFolderSelect()
-                launchPlaybackFolder()
-            }
-            .setNeutralButton(R.string.file_browser_cancel, null)
+            .setView(content)
             .showPlaybackModal()
+        playbackErrorDialog = dialog
+        fun stillCurrent() = playerController === controller &&
+            player.currentMediaItemIndex == pending.mediaIndex && player.currentMediaItem == pending.mediaItem
+        fun action(id: Int, operation: () -> Unit) {
+            content.findViewById<View>(id).setOnClickListener {
+                if (playbackErrorDialog !== dialog || !dialog.isShowing || isInBackground) return@setOnClickListener
+                val current = stillCurrent()
+                dialog.dismiss()
+                if (current) operation()
+            }
+        }
+        action(R.id.error_retry) { controller.recoverPlayback(pending.mediaIndex, pending.positionMs) }
+        content.findViewById<View>(R.id.error_next).visibility = if (player.hasNextMediaItem()) View.VISIBLE else View.GONE
+        action(R.id.error_next) {
+            if (player.hasNextMediaItem()) controller.recoverPlayback(player.nextMediaItemIndex, 0L)
+        }
+        action(R.id.error_file_list) { openCurrentPlaybackSelection() }
+        action(R.id.error_close) { /* Keep the failed item paused. */ }
+        content.findViewById<View>(R.id.error_retry).requestFocus()
+    }
+
+    private fun playbackErrorGuidance(error: androidx.media3.common.PlaybackException,
+        item: androidx.media3.common.MediaItem?): Int {
+        val causes = generateSequence<Throwable>(error) { it.cause }.take(10).toList()
+        val permissionLost = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+            causes.any { it is SecurityException || (it is android.system.ErrnoException && it.errno == android.system.OsConstants.EACCES) }
+        if (permissionLost) return R.string.playback_permission_recovery
+        val uri = item?.localConfiguration?.uri
+        val ioFailure = error.errorCode in 2000..2999
+        return when {
+            ioFailure && (uri?.scheme == "http" || uri?.scheme == "https") -> R.string.playback_network_recovery
+            ioFailure && (uri?.scheme == "file" || uri?.scheme == "content") -> R.string.playback_storage_recovery
+            else -> R.string.playback_media_recovery
+        }
     }
 
     private fun AlertDialog.Builder.showPlaybackModal(): AlertDialog {

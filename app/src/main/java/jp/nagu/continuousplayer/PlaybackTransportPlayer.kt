@@ -58,6 +58,16 @@ internal class PlaybackTransportPlayer(
         delegate.playWhenReady = playWhenReady
     }
 
+    /** Recovery is a deliberate action after failure, not a normal seek gesture. */
+    fun recover(mediaIndex: Int, positionMs: Long) {
+        if (mediaIndex !in 0 until delegate.mediaItemCount) return
+        clearCompletion()
+        delegate.pause()
+        delegate.seekTo(mediaIndex, positionMs.coerceAtLeast(0))
+        delegate.prepare()
+        play()
+    }
+
     override fun getSeekBackIncrement(): Long = 10_000L
     override fun getSeekForwardIncrement(): Long = 10_000L
     override fun seekBack() = seekBackwardBy(seekBackIncrement)
