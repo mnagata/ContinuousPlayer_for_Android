@@ -8,9 +8,13 @@ import android.os.Bundle;
 public class ScrollFixtureGrantActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        grantUriPermission(getIntent().getStringExtra("target"), ScrollFixtureProvider.tree,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION |
-                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        String[] trees = getIntent().getStringArrayExtra("trees");
+        if (trees == null) trees = new String[]{ScrollFixtureProvider.tree.toString()};
+        int access = getIntent().getIntExtra("accessFlags", Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        for (String tree : trees) {
+            grantUriPermission(getIntent().getStringExtra("target"), android.net.Uri.parse(tree),
+                access | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        }
         finish();
     }
 }

@@ -47,6 +47,7 @@
         android:layout_marginTop="10dp" android:textColor="#9BAFC9" android:textSize="12sp" />
 
     <LinearLayout android:id="@+id/dlna_bottom_actions" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:baselineAligned="false"
         android:layout_marginTop="12dp" android:orientation="horizontal">
         <Button android:id="@+id/dlna_register" android:layout_width="0dp" android:layout_height="wrap_content"
                 android:minHeight="48dp"

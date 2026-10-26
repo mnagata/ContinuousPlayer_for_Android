@@ -80,11 +80,8 @@ class SafFileBrowser(
                 showDirectory(listOf(root))
             }
         } else {
-            val trees = grantedTrees()
-            if (hasSavedDlnaFolders() || savedUsbFolders.all().isNotEmpty()) showRoots()
-            else if (trees.isEmpty()) addFolder()
-            else if (trees.size == 1) open(trees.single())
-            else showRoots()
+            // Home always opens the saved list; opening a folder or adding one is explicit.
+            showRoots()
         }
     }
 

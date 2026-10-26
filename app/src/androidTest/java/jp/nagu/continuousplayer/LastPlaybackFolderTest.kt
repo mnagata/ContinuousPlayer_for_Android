@@ -52,7 +52,7 @@ class LastPlaybackFolderTest {
         assertEquals(0, restored.initialSelection(listOf(tree("first")), emptyList()))
     }
 
-    @Test fun singleSafTreeReopensAtThePlayedChildAndRestoresEachLevel() {
+    @Test fun singleSafTreeUsesSavedListThenRestoresPlayedChildAtEachLevel() {
         val saved = context.getSharedPreferences("saved_dlna_folders", Context.MODE_PRIVATE)
         val originalFolders = saved.getString("folders", null)
         val tree = ScrollFixtureProvider.tree
@@ -76,6 +76,8 @@ class LastPlaybackFolderTest {
                     }
                     browser.open()
                 }
+                BrowserTestUi.waitForText(R.string.saf_choose_folder)
+                BrowserTestUi.tap("Scroll fixture")
                 BrowserTestUi.waitForText("Season 00")
                 selectRow(scenario, "Scroll fixture", 24)
                 BrowserTestUi.waitForText("Collection 00")
@@ -122,6 +124,9 @@ class LastPlaybackFolderTest {
             assertTrue(preferences.getStringSet("saf_path", emptySet()).orEmpty().any { it.contains("season-24") })
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { it.findViewById<android.widget.Button>(R.id.btn_select_folder).performClick() }
+                BrowserTestUi.waitForText(R.string.saf_choose_folder)
+                assertFirstRow(scenario, context.getString(R.string.saf_choose_folder), "Scroll fixture")
+                BrowserTestUi.tap("Scroll fixture")
                 BrowserTestUi.waitForText("Season 24")
                 assertFirstRow(scenario, "Scroll fixture", "Season 24")
                 BrowserTestUi.tap("Season 24")
