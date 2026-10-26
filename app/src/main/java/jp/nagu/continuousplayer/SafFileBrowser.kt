@@ -4,6 +4,7 @@ import android.net.Uri
 import android.content.Intent
 import android.provider.DocumentsContract
 import android.util.Log
+import android.widget.PopupMenu
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
@@ -29,6 +30,7 @@ class SafFileBrowser(
     private val lastPlaybackFolder = LastPlaybackFolder(activity)
     private var dialog: DlnaSelectionDialog? = null
     private var folderMenu: DlnaSelectionDialog? = null
+    private var folderActions: PopupMenu? = null
     private var job: Job? = null
     internal var selectedFolder: PlaybackFolder.Saf? = null
         private set
@@ -36,6 +38,8 @@ class SafFileBrowser(
     internal fun openFolder(folder: PlaybackFolder.Saf, focusUri: Uri? = null) = browse(folder.path, focusUri)
 
     fun close() {
+        folderActions?.dismiss()
+        folderActions = null
         folderMenu?.dismiss()
         folderMenu = null
         job?.cancel()
@@ -51,6 +55,8 @@ class SafFileBrowser(
 
     /** Transfer the attached window without revealing the activity underneath. */
     internal fun takeDialog(): DlnaSelectionDialog? {
+        folderActions?.dismiss()
+        folderActions = null
         folderMenu?.dismiss()
         folderMenu = null
         job?.cancel()
@@ -59,6 +65,8 @@ class SafFileBrowser(
     }
 
     fun onConfigurationChanged() {
+        folderActions?.dismiss()
+        folderActions = null
         dialog?.takeIf { it.isShowing }?.refreshForConfiguration()
         folderMenu?.takeIf { it.isShowing }?.refreshForConfiguration()
     }
@@ -125,8 +133,8 @@ class SafFileBrowser(
     }
 
     private fun showRoots(focusUri: Uri? = null, focusDlna: SavedDlnaFolder? = null,
-        focusUsb: SavedUsbFolder? = null) {
-        load(retry = { showRoots(focusUri, focusDlna, focusUsb) }) {
+        focusUsb: SavedUsbFolder? = null, focusIndex: Int? = null) {
+        load(retry = { showRoots(focusUri, focusDlna, focusUsb, focusIndex) }) {
             val roots = withContext(Dispatchers.IO) {
                 // Keep disconnected/revoked roots selectable so their error offers retry/add.
                 val folders = grantedTrees().map { tree ->
@@ -146,6 +154,14 @@ class SafFileBrowser(
                 focusUsb != null -> usb.indexOf(focusUsb).takeIf { it >= 0 }?.let { roots.size + dlna.size + it }
                 else -> null
             }
+            val titles = roots.map { it.second } + dlna.map { it.title } + usb.map { it.title }
+            fun removeAt(index: Int) {
+                when {
+                    index < roots.size -> releaseFolderPermission(roots[index].first)
+                    index < roots.size + dlna.size -> dlna[index - roots.size].let { savedFolders.remove(it.serverId, it.folderId) }
+                    else -> savedUsbFolders.remove(usb[index - roots.size - dlna.size])
+                }
+            }
             showDialog(DlnaDialogContent(
                 title = activity.getString(R.string.saf_choose_folder),
                 label = null,
@@ -159,7 +175,8 @@ class SafFileBrowser(
                         detail = "${activity.getString(R.string.saved_folder_usb)} · ${it.directoryPath}")
                 },
                 message = activity.getString(R.string.saf_no_folder),
-                initialSelection = explicitSelection ?: lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri, usb),
+                initialSelection = focusIndex?.coerceIn(0, (titles.size - 1).coerceAtLeast(0)) ?: explicitSelection ?:
+                    lastPlaybackFolder.initialSelection(roots.map { it.first }, dlna, focusUri, usb),
                 refreshLabel = R.string.saf_add_folder,
                 onRefresh = { addFolder() },
                 onClose = { cancel() },
@@ -173,38 +190,65 @@ class SafFileBrowser(
                         close()
                     }
                 },
-                onLongSelected = { index ->
-                    val root = roots.getOrNull(index)
-                    val folder = dlna.getOrNull(index - roots.size)
-                    val usbFolder = usb.getOrNull(index - roots.size - dlna.size)
-                    folderMenu?.dismiss()
-                    folderMenu = DlnaSelectionDialog(activity, DlnaDialogContent(
-                        title = root?.second ?: folder?.title ?: usbFolder?.title.orEmpty(),
-                        label = R.string.saved_folder_dialog_label,
-                        message = activity.getString(R.string.folder_unregister_message),
-                        registerLabel = R.string.folder_unregister,
-                        onRegister = {
-                            folderMenu?.dismiss()
-                            folderMenu = null
-                            try {
-                                if (root != null) releaseFolderPermission(root.first)
-                                else if (folder != null) savedFolders.remove(folder.serverId, folder.folderId)
-                                else if (usbFolder != null) savedUsbFolders.remove(usbFolder)
-                                android.widget.Toast.makeText(activity, R.string.folder_unregistered,
-                                    android.widget.Toast.LENGTH_SHORT).show()
-                            } catch (error: SecurityException) {
-                                Log.w("SafFileBrowser", "Cannot release folder permission", error)
-                                android.widget.Toast.makeText(activity, R.string.folder_unregister_failed,
-                                    android.widget.Toast.LENGTH_LONG).show()
-                            }
-                            showRoots()
-                        },
-                        onClose = {
-                            folderMenu?.dismiss()
-                            folderMenu = null
-                        })).also { it.show() }
-                }))
+                onMoreSelected = { index -> showFolderActions(index, titles[index]) { removeAt(index) } },
+                onLongSelected = { index -> confirmUnregister(index, titles[index]) { removeAt(index) } }))
         }
+    }
+
+    private fun showFolderActions(index: Int, title: String, remove: () -> Unit) {
+        val owner = dialog ?: return
+        val list = owner.findViewById<android.widget.ListView>(R.id.dlna_list) ?: return
+        val row = list.getChildAt(index - list.firstVisiblePosition) ?: return
+        val anchor = row.findViewById<android.view.View>(R.id.saved_folder_more) ?: return
+        folderActions?.dismiss()
+        val actions = PopupMenu(activity, anchor)
+        folderActions = actions
+        actions.menu.add(R.string.folder_unregister).setOnMenuItemClickListener {
+            if (folderActions === actions && dialog === owner && owner.isShowing) confirmUnregister(index, title, remove)
+            true
+        }
+        actions.setOnDismissListener {
+            if (folderActions === actions) folderActions = null
+            if (dialog === owner && owner.isShowing && folderMenu == null) owner.focusRow(index)
+        }
+        actions.show()
+    }
+
+    private fun confirmUnregister(index: Int, title: String, remove: () -> Unit) {
+        val owner = dialog ?: return
+        folderMenu?.dismiss()
+        lateinit var confirmation: DlnaSelectionDialog
+        confirmation = DlnaSelectionDialog(activity, DlnaDialogContent(
+            title = title,
+            label = R.string.saved_folder_dialog_label,
+            message = activity.getString(R.string.folder_unregister_message),
+            registerLabel = R.string.folder_unregister,
+            initialActionFocus = R.id.dlna_close,
+            onRegister = {
+                if (folderMenu === confirmation && dialog === owner && owner.isShowing) {
+                    folderMenu = null
+                    confirmation.dismiss()
+                    try {
+                        remove()
+                        android.widget.Toast.makeText(activity, R.string.folder_unregistered, android.widget.Toast.LENGTH_SHORT).show()
+                        // The next row keeps this index; clamping selects the previous row at the end.
+                        showRoots(focusIndex = index)
+                    } catch (error: SecurityException) {
+                        Log.w("SafFileBrowser", "Cannot release folder permission", error)
+                        android.widget.Toast.makeText(activity, R.string.folder_unregister_failed, android.widget.Toast.LENGTH_LONG).show()
+                        owner.focusRow(index)
+                    }
+                }
+            },
+            onClose = {
+                if (folderMenu === confirmation) {
+                    folderMenu = null
+                    confirmation.dismiss()
+                    if (dialog === owner && owner.isShowing) owner.focusRow(index)
+                }
+            }))
+        folderMenu = confirmation
+        confirmation.show()
     }
 
     private fun releaseFolderPermission(tree: Uri) {

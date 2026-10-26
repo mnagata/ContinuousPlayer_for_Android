@@ -28,7 +28,8 @@ public class ScrollFixtureProvider extends DocumentsProvider {
         return cursor;
     }
 
-    @Override public Cursor queryDocument(String id, String[] projection) {
+    @Override public Cursor queryDocument(String id, String[] projection) throws FileNotFoundException {
+        if (id.equals("d19-offline")) throw new FileNotFoundException("D19 offline test storage");
         MatrixCursor cursor = new MatrixCursor(COLUMNS);
         cursor.addRow(row(id));
         return cursor;

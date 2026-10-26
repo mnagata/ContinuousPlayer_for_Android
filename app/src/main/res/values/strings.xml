@@ -79,13 +79,16 @@
     <string name="saved_folder_dialog_label">保存済みフォルダー</string>
     <string name="saved_folder_list">保存済みフォルダー</string>
     <string name="saved_folder_local">端末 / SAFのフォルダー</string>
-    <string name="saved_folder_hint">フォルダーを選んで開きます。登録解除はフォルダーを長押ししてください。</string>
+    <string name="saved_folder_hint">フォルダーを選んで開きます。登録解除は各行の「その他」から行えます。</string>
     <string name="folder_register">このフォルダーを登録</string>
+    <string name="folder_chevron" translatable="false">›</string>
+    <string name="saved_folder_more">%1$sのその他</string>
+    <string name="saved_folder_open">開く</string>
     <string name="folder_unregister">登録解除</string>
     <string name="folder_registered">保存済みフォルダーに登録しました。</string>
     <string name="folder_unregistered">フォルダーの登録を解除しました。</string>
     <string name="folder_unregister_failed">フォルダーの登録を解除できませんでした。もう一度お試しください。</string>
-    <string name="folder_unregister_message">このフォルダーを保存済み一覧から外します。フォルダーやファイル自体は削除されません。</string>
+    <string name="folder_unregister_message">登録を解除しますか？ ファイルは削除されません。</string>
     <string name="dlna_saved_server_missing">登録先のサーバー「%1$s」が見つかりません。同じLANに接続し、サーバーの電源とDLNAの設定を確認してください。</string>
     <string name="add_folder_source_hint">追加するフォルダーの保存先を選んでください。</string>
     <string name="add_folder_local_detail">端末・外部ストレージから選択</string>

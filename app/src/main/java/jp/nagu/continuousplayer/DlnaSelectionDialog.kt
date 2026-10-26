@@ -2,6 +2,7 @@ package jp.nagu.continuousplayer
 
 import android.annotation.SuppressLint
 import android.content.res.Configuration
+import android.view.accessibility.AccessibilityNodeInfo
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Handler
@@ -23,6 +24,7 @@ import androidx.activity.ComponentDialog
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.updateLayoutParams
+import androidx.core.view.doOnPreDraw
 import kotlin.math.min
 
 internal data class DlnaRow(
@@ -50,7 +52,9 @@ internal data class DlnaDialogContent(
     val onRegister: (() -> Unit)? = null,
     val onClose: () -> Unit,
     val onSelected: (Int) -> Unit = {},
-    val onLongSelected: ((Int) -> Unit)? = null
+    val onLongSelected: ((Int) -> Unit)? = null,
+    val onMoreSelected: ((Int) -> Unit)? = null,
+    val initialActionFocus: Int? = null
 )
 
 /** One persistent window whose content changes during navigation and loading. */
@@ -166,6 +170,10 @@ internal class DlnaSelectionDialog(
         findViewById<View>(R.id.dlna_pending_progress).visibility =
             if (awaitingDirectory && pendingProgressVisible) View.VISIBLE else View.GONE
         list.isEnabled = !awaitingDirectory
+        for (index in 0 until list.childCount) {
+            list.getChildAt(index).findViewById<View>(R.id.saved_folder_open)?.isEnabled = !awaitingDirectory
+            list.getChildAt(index).findViewById<View>(R.id.saved_folder_more)?.isEnabled = !awaitingDirectory
+        }
         for (id in listOf(R.id.dlna_up, R.id.dlna_refresh, R.id.dlna_register)) {
             findViewById<View>(id).isEnabled = !awaitingDirectory
         }
@@ -281,7 +289,8 @@ internal class DlnaSelectionDialog(
             }
         }
         list = findViewById<ListView>(R.id.dlna_list).apply {
-            adapter = RowAdapter(current.rows, compact = current.fileSelection)
+            adapter = RowAdapter(current)
+            itemsCanFocus = current.onMoreSelected != null
             val gap = when {
                 !current.fileSelection -> 6
                 activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE -> 1
@@ -300,6 +309,7 @@ internal class DlnaSelectionDialog(
             isLongClickable = current.onLongSelected != null
             var contextPress = false
             setOnTouchListener { _, event ->
+                if (current.onMoreSelected != null) return@setOnTouchListener false
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     contextPress = event.isPointerInput() && event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)
                     if (contextPress && !awaitingDirectory) {
@@ -343,20 +353,38 @@ internal class DlnaSelectionDialog(
         updateInteractionState()
     }
 
-    private fun focusSelection() {
-        val current = content
+    internal fun focusRow(position: Int) {
+        if (content.rows.isNotEmpty()) focusRow(content, position.coerceIn(content.rows.indices))
+    }
+
+    private fun focusRow(current: DlnaDialogContent, position: Int) {
         val currentList = list
-        if (current.rows.isNotEmpty()) {
-            currentList.post {
-                if (isShowing && content === current && list === currentList) {
-                    // Ignore focus requests left over from a previous directory/load state.
-                    if (isTv()) currentList.requestFocusFromTouch()
-                    else if (!currentList.isInTouchMode) currentList.requestFocus()
-                    currentList.setSelectionFromTop(current.initialSelection.coerceIn(current.rows.indices), 0)
+        currentList.post {
+            if (isShowing && content === current && list === currentList) {
+                // Focus the list first so an old focused child cannot keep the old row selected.
+                currentList.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                if (isTv() || current.onMoreSelected != null) currentList.requestFocusFromTouch()
+                else if (!currentList.isInTouchMode) currentList.requestFocus()
+                currentList.setSelectionFromTop(position, 0)
+                currentList.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+                if (current.onMoreSelected != null) currentList.doOnPreDraw {
+                    if (isShowing && content === current && list === currentList && currentList.selectedItemPosition == position) {
+                        val open = currentList.selectedView?.findViewById<View>(R.id.saved_folder_open)
+                        if (!currentList.isInTouchMode) open?.requestFocus()
+                    }
                 }
             }
-        } else {
-            findViewById<Button>(if (current.onRegister != null) R.id.dlna_register else if (current.onRefresh != null) R.id.dlna_refresh else R.id.dlna_close).requestFocus()
+        }
+    }
+
+    private fun focusSelection() {
+        val current = content
+        if (current.rows.isNotEmpty()) focusRow(current, current.initialSelection.coerceIn(current.rows.indices))
+        else {
+            val action = findViewById<View>(current.initialActionFocus ?: if (current.onRegister != null) R.id.dlna_register
+                else if (current.onRefresh != null) R.id.dlna_refresh else R.id.dlna_close)
+            if (isTv() || current.initialActionFocus != null || current.refreshLabel == R.string.saf_add_folder) action.requestFocusFromTouch()
+            else action.requestFocus()
         }
     }
 
@@ -395,12 +423,17 @@ internal class DlnaSelectionDialog(
     private fun isTv() = activity.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK ==
         Configuration.UI_MODE_TYPE_TELEVISION
 
-    private inner class RowAdapter(private val rows: List<DlnaRow>, private val compact: Boolean) : BaseAdapter() {
+    private inner class RowAdapter(private val snapshot: DlnaDialogContent) : BaseAdapter() {
+        private val rows = snapshot.rows
+        private val compact = snapshot.fileSelection
+        private val more = snapshot.onMoreSelected != null
         override fun getCount() = rows.size
         override fun getItem(position: Int) = rows[position]
         override fun getItemId(position: Int) = position.toLong()
+        @SuppressLint("ClickableViewAccessibility") // Secondary click uses the same accessible long-click action; primary touch stays native.
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val view = convertView ?: LayoutInflater.from(activity).inflate(R.layout.item_dlna_browser, parent, false)
+            val recycled = convertView?.takeIf { (it.findViewById<View>(R.id.saved_folder_open) != null) == more }
+            val view = recycled ?: LayoutInflater.from(activity).inflate(if (more) R.layout.item_saved_folder else R.layout.item_dlna_browser, parent, false)
             val density = activity.resources.displayMetrics.density
             val landscape = compact && activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
             val minHeight = when {
@@ -415,7 +448,7 @@ internal class DlnaSelectionDialog(
                 else -> 8
             }
             val verticalPadding = (padding * density).toInt()
-            view.setPadding(view.paddingLeft, verticalPadding, view.paddingRight, verticalPadding)
+            if (!more) view.setPadding(view.paddingLeft, verticalPadding, view.paddingRight, verticalPadding)
             val row = rows[position]
             view.findViewById<TextView>(R.id.dlna_row_title).apply {
                 text = row.title
@@ -431,7 +464,59 @@ internal class DlnaSelectionDialog(
             }
             view.findViewById<ImageView>(R.id.dlna_row_icon).setImageResource(
                 if (compact && row.icon == R.drawable.ic_play) R.drawable.ic_browser_play else row.icon)
-            view.contentDescription = if (row.detail.isBlank()) row.description else "${row.description}。${row.detail}"
+            val description = if (row.detail.isBlank()) row.description else "${row.description}。${row.detail}"
+            if (!more) view.contentDescription = description
+            else {
+                fun active() = isShowing && content === snapshot && !awaitingDirectory
+                val open = view.findViewById<View>(R.id.saved_folder_open)
+                val actions = view.findViewById<View>(R.id.saved_folder_more)
+                open.contentDescription = "$description。${activity.getString(R.string.saved_folder_open)}"
+                open.accessibilityDelegate = object : View.AccessibilityDelegate() {
+                    override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+                        super.onInitializeAccessibilityNodeInfo(host, info)
+                        info.className = Button::class.java.name
+                    }
+                }
+                open.isEnabled = !awaitingDirectory
+                actions.isEnabled = !awaitingDirectory
+                open.setOnClickListener { if (active()) snapshot.onSelected(position) }
+                open.setOnLongClickListener {
+                    if (active()) snapshot.onLongSelected?.invoke(position)
+                    true
+                }
+                var contextPress = false
+                open.setOnTouchListener { _, event ->
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                        contextPress = event.isPointerInput() && event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)
+                        if (contextPress && active()) snapshot.onLongSelected?.invoke(position)
+                    }
+                    val handled = contextPress
+                    if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) contextPress = false
+                    handled
+                }
+                open.setOnGenericMotionListener { _, event ->
+                    event.isPointerInput() && event.actionButton == MotionEvent.BUTTON_SECONDARY &&
+                        (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE)
+                }
+                actions.contentDescription = activity.getString(R.string.saved_folder_more, row.title) +
+                    if (row.detail.isBlank()) "" else "。${row.detail}"
+                actions.setOnClickListener { if (active()) snapshot.onMoreSelected?.invoke(position) }
+                open.nextFocusRightId = actions.id
+                actions.nextFocusLeftId = open.id
+                // ListView's horizontal focus search rejects overlapping row/control bounds.
+                // Move between these two explicit actions before delegating vertical navigation.
+                open.setOnKeyListener { _, code, event ->
+                    val move = (code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_TAB) && event.hasNoModifiers()
+                    if (move && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && active()) actions.requestFocus()
+                    move
+                }
+                actions.setOnKeyListener { _, code, event ->
+                    val move = (code == KeyEvent.KEYCODE_DPAD_LEFT && event.hasNoModifiers()) ||
+                        (code == KeyEvent.KEYCODE_TAB && event.hasModifiers(KeyEvent.META_SHIFT_ON))
+                    if (move && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && active()) open.requestFocus()
+                    move
+                }
+            }
             return view
         }
     }
