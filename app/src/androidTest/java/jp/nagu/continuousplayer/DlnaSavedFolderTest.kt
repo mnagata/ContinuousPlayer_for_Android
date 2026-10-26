@@ -215,8 +215,6 @@ class DlnaSavedFolderTest {
             scenario.onActivity { client.available = true }
             BrowserTestUi.tap(R.string.playback_retry)
             waitForText("Sample OP")
-            BrowserTestUi.tap(R.string.usb_parent)
-            waitForText("Fixture nested OP ED")
             BrowserTestUi.tap(R.string.saved_folder_list)
             BrowserTestUi.waitUntil { returned }
             assertTrue(returned)

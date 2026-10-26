@@ -169,8 +169,8 @@ class MainActivity : AppCompatActivity() {
                     onReturn = { safBrowser.openSavedFolders(dlnaBrowser.takeDialog()) })
             },
             onDlnaFolder = { folder ->
-                dlnaBrowser.openSaved(folder, safBrowser.takeDialog()) {
-                    safBrowser.openSavedFolders(dlnaBrowser.takeDialog())
+                dlnaBrowser.openSaved(folder, safBrowser.takeDialog()) { returned ->
+                    safBrowser.openSavedFolders(dlnaBrowser.takeDialog(), focusDlna = returned)
                 }
             },
             onAddUsb = { launchUsbPicker() },
@@ -507,11 +507,11 @@ class MainActivity : AppCompatActivity() {
     private fun launchPlaybackFolder(focusMedia: VideoItem? = null) {
         when (val folder = viewModel.playbackFolder) {
             is PlaybackFolder.Saf -> safBrowser.openFolder(folder, focusMedia?.uri?.let(Uri::parse))
-            is PlaybackFolder.Dlna -> dlnaBrowser.openSaved(folder.folder, focusMediaId = focusMedia?.dlnaObjectId) {
-                safBrowser.openSavedFolders(dlnaBrowser.takeDialog())
+            is PlaybackFolder.Dlna -> dlnaBrowser.openSaved(folder.folder, focusMediaId = focusMedia?.dlnaObjectId) { returned ->
+                safBrowser.openSavedFolders(dlnaBrowser.takeDialog(), focusDlna = returned)
             }
-            is PlaybackFolder.Usb -> usbBrowser.openSaved(folder, null, focusUri = focusMedia?.uri) {
-                safBrowser.openSavedFolders(usbBrowser.takeDialog())
+            is PlaybackFolder.Usb -> usbBrowser.openSaved(folder, null, focusUri = focusMedia?.uri) { returned ->
+                safBrowser.openSavedFolders(usbBrowser.takeDialog(), focusUsb = returned)
             }
             null -> launchPicker()
         }
@@ -540,8 +540,8 @@ class MainActivity : AppCompatActivity() {
         if (folder == null) usbBrowser.openForRegistration(safBrowser.takeDialog(),
             onRegistered = { registered -> safBrowser.openSavedFolders(usbBrowser.takeDialog(), focusUsb = registered) },
             onReturn = { safBrowser.openSavedFolders(usbBrowser.takeDialog()) })
-        else usbBrowser.openSaved(folder, safBrowser.takeDialog()) {
-            safBrowser.openSavedFolders(usbBrowser.takeDialog())
+        else usbBrowser.openSaved(folder, safBrowser.takeDialog()) { returned ->
+            safBrowser.openSavedFolders(usbBrowser.takeDialog(), focusUsb = returned)
         }
     }
 

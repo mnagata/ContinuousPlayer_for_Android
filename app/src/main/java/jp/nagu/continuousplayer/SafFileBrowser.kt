@@ -86,7 +86,7 @@ class SafFileBrowser(
 
     fun open(treeUri: Uri? = null) {
         if (treeUri != null) {
-            load(retry = { open(treeUri) }, onUp = { showRoots() }) {
+            load(retry = { open(treeUri) }, onUp = { showRoots(focusUri = treeUri) }, focusTree = treeUri) {
                 val root = withContext(Dispatchers.IO) { reader.root(treeUri) }
                 showDirectory(listOf(root))
             }
@@ -260,7 +260,9 @@ class SafFileBrowser(
     }
 
     private fun browse(path: List<SafFolder>, focusUri: Uri? = null) {
-        load(retry = { browse(path, focusUri) }, onUp = { parent(path) }) {
+        val tree = path.firstOrNull()?.uri?.let { DocumentsContract.buildTreeDocumentUri(
+            requireNotNull(it.authority), DocumentsContract.getTreeDocumentId(it)) }
+        load(retry = { browse(path, focusUri) }, onUp = { parent(path) }, focusTree = tree) {
             showDirectory(path, focusUri)
         }
     }
@@ -315,7 +317,7 @@ class SafFileBrowser(
         else dialog = DlnaSelectionDialog(activity, next).also { it.show() }
     }
 
-    private fun load(retry: () -> Unit, onUp: (() -> Unit)? = null, action: suspend () -> Unit) {
+    private fun load(retry: () -> Unit, onUp: (() -> Unit)? = null, focusTree: Uri? = null, action: suspend () -> Unit) {
         job?.cancel()
         if (dialog?.keepListWhileLoading(onClose = { cancel() }) != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.saf_dialog_label),
@@ -331,7 +333,7 @@ class SafFileBrowser(
                 showDialog(DlnaDialogContent(
                     title = activity.getString(R.string.saf_read_error),
                     message = activity.getString(R.string.saf_error_help) + "\n\n${error.message.orEmpty()}",
-                    upLabel = R.string.saf_folder_list, onUp = { showRoots() },
+                    upLabel = R.string.saf_folder_list, onUp = { showRoots(focusUri = focusTree) },
                     refreshLabel = R.string.playback_retry, onRefresh = retry,
                     onClose = { cancel() }))
             }

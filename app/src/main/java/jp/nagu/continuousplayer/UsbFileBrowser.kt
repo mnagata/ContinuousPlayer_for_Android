@@ -37,11 +37,11 @@ class UsbFileBrowser(
         if (forRegistration) {
             close()
             browse(folder.root, folder.directory)
-        } else openSaved(folder, null, onReturn = onFolderSelected)
+        } else openSaved(folder, null, onReturn = { onFolderSelected() })
     }
 
     internal fun openSaved(folder: PlaybackFolder.Usb, inheritedDialog: DlnaSelectionDialog?, focusUri: String? = null,
-        onReturn: () -> Unit) {
+        onReturn: (SavedUsbFolder) -> Unit) {
         close()
         playbackBrowser.open(folder, inheritedDialog, focusUri, onReturn)
     }

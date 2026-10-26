@@ -49,15 +49,17 @@ internal class UsbPlaybackBrowser(
         dialog?.takeIf { it.isShowing }?.refreshForConfiguration()
     }
 
-    fun open(folder: PlaybackFolder.Usb, inheritedDialog: DlnaSelectionDialog?, focusUri: String?, onReturn: () -> Unit) {
+    fun open(folder: PlaybackFolder.Usb, inheritedDialog: DlnaSelectionDialog?, focusUri: String?, onReturn: (SavedUsbFolder) -> Unit) {
         close()
         dialog = inheritedDialog
-        this.onReturn = onReturn
         // Reopening the playback folder preserves navigation within its registered ancestor.
-        navigationRoot = SavedUsbFolders(activity).all().filter {
+        val boundary = SavedUsbFolders(activity).all().filter {
             it.rootPath == folder.root.canonicalPath &&
                 folder.directory.canonicalFile.toPath().startsWith(File(it.directoryPath).toPath())
         }.maxByOrNull { it.directoryPath.length }?.let { File(it.directoryPath) } ?: folder.directory
+        navigationRoot = boundary
+        val returnedFolder = SavedUsbFolder(folder.root.canonicalPath, boundary.canonicalPath)
+        this.onReturn = { onReturn(returnedFolder) }
         browse(folder.root, folder.directory, focusUri = focusUri)
     }
 

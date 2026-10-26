@@ -224,7 +224,7 @@ class UsbFolderBrowserTest {
         val stores = listOf("saved_usb_folders", "saved_dlna_folders", "usb_browser", "last_playback_folder")
             .associateWith { context.getSharedPreferences(it, Context.MODE_PRIVATE) }
         val originals = stores.mapValues { it.value.all.toMap() }
-        val root = File(context.cacheDir, "usb-folder-fixture").apply { mkdirs() }
+        val root = File(context.filesDir, "usb-folder-fixture").apply { mkdirs() }
         val directory = File(root, "USB OP ED folder").apply { mkdirs() }
         File(directory, "Sample OP.mp4").writeBytes(byteArrayOf(1))
         try {

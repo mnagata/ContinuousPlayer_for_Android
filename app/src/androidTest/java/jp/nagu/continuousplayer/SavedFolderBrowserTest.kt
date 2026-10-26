@@ -158,8 +158,6 @@ class SavedFolderBrowserTest {
             assertEquals(0, detachCount)
             assertEquals(android.view.View.GONE, windowView.findViewById<android.view.View>(R.id.dlna_pending_progress).visibility)
         }
-        BrowserTestUi.tap(R.string.usb_parent)
-        waitForFolder(folder.serverName)
         BrowserTestUi.tap(R.string.saved_folder_list)
         BrowserTestUi.waitForText(R.string.saf_choose_folder)
         scenario.onActivity {

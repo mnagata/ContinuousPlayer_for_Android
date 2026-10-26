@@ -21,6 +21,7 @@ class DlnaBrowser(
 ) {
     private val savedFolders = SavedDlnaFolders(activity)
     private var returnToSavedFolders: (() -> Unit)? = null
+    private var navigationRoot: SavedDlnaFolder? = null
     private var registering = false
     private var onRegistered: ((SavedDlnaFolder) -> Unit)? = null
     private val scanner = VideoScanner()
@@ -36,6 +37,7 @@ class DlnaBrowser(
         dialog?.dismiss()
         dialog = null
         returnToSavedFolders = null
+        navigationRoot = null
         registering = false
         onRegistered = null
     }
@@ -52,6 +54,7 @@ class DlnaBrowser(
         job?.cancel()
         job = null
         returnToSavedFolders = null
+        navigationRoot = null
         registering = false
         onRegistered = null
         return dialog.also { dialog = null }
@@ -85,10 +88,16 @@ class DlnaBrowser(
         }
     }
 
-    fun openSaved(folder: SavedDlnaFolder, focusMediaId: String? = null, onReturn: () -> Unit) {
+    fun openSaved(folder: SavedDlnaFolder, focusMediaId: String? = null, onReturn: (SavedDlnaFolder) -> Unit) {
         registering = false
         onRegistered = null
-        returnToSavedFolders = onReturn
+        // A playback directory may lie below a saved root; direct saved selections match themselves.
+        val root = savedFolders.all().filter { candidate ->
+            candidate.serverId == folder.serverId && candidate.path.size <= folder.path.size &&
+                candidate.path.map { it.id } == folder.path.take(candidate.path.size).map { it.id }
+        }.maxByOrNull { it.path.size } ?: folder
+        navigationRoot = root
+        returnToSavedFolders = { onReturn(root) }
         load(R.string.dlna_searching, retry = { openSaved(folder, focusMediaId, onReturn) }) {
             servers = discoverServers()
             val server = servers.firstOrNull { it.id == folder.serverId }
@@ -99,7 +108,7 @@ class DlnaBrowser(
         }
     }
 
-    internal fun openSaved(folder: SavedDlnaFolder, inheritedDialog: DlnaSelectionDialog?, onReturn: () -> Unit) {
+    internal fun openSaved(folder: SavedDlnaFolder, inheritedDialog: DlnaSelectionDialog?, onReturn: (SavedDlnaFolder) -> Unit) {
         close()
         dialog = inheritedDialog
         openSaved(folder, onReturn = onReturn)
@@ -147,7 +156,14 @@ class DlnaBrowser(
         }
     }
 
+    private fun atNavigationRoot(path: List<DlnaEntry>) = !registering && navigationRoot?.let {
+        path.map { entry -> entry.id } == it.path.map { entry -> entry.id }
+    } == true
+
     private suspend fun showDirectory(server: DlnaServer, path: List<DlnaEntry>, focusId: String? = null) {
+        navigationRoot?.takeUnless { registering }?.let { root ->
+            check(server.id == root.serverId && path.take(root.path.size).map { it.id } == root.path.map { it.id })
+        }
         val entries = withContext(Dispatchers.IO) { client.browse(server, path.last().id) }
         val folders = DlnaFolderSorter.sort(entries.filter { it.media == null })
         val videos = scanner.sortMedia(entries.mapNotNull { entry ->
@@ -171,8 +187,8 @@ class DlnaBrowser(
             message = activity.getString(R.string.dlna_empty),
             initialSelection = if (mediaSelection >= 0) folders.size + mediaSelection
                 else folders.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
-            upLabel = if (path.size > 1) R.string.usb_parent else if (!registering && returnToSavedFolders != null)
-                R.string.saved_folder_list else R.string.dlna_server_list,
+            upLabel = if (atNavigationRoot(path)) R.string.saved_folder_list
+                else if (path.size > 1) R.string.usb_parent else R.string.dlna_server_list,
             onUp = { parent(server, path) },
             onRefresh = { browse(server, path) },
             registerLabel = R.string.folder_register,
@@ -201,7 +217,7 @@ class DlnaBrowser(
     }
 
     private fun parent(server: DlnaServer, path: List<DlnaEntry>) {
-        if (path.size == 1 && !registering && returnToSavedFolders != null) returnToSaved()
+        if (atNavigationRoot(path)) returnToSaved()
         else if (path.size == 1) showServers(server.id)
         else browse(server, path.dropLast(1), path.last().id)
     }
