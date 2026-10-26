@@ -129,11 +129,23 @@ class PlaybackBoundaryTest {
         BrowserTestUi.waitUntil { infoWindow() == null && f.view.rootView.hasWindowFocus() && f.view.rootView.findViewById<View>(R.id.pause_overlay).isShown }
         scenario.onActivity {
             assertFalse(f.player.playWhenReady)
-            assertTrue(f.owner.isPlaybackCompleted)
+            assertTrue("state=${f.player.playbackState}, position=${f.player.currentPosition}", f.owner.isPlaybackCompleted)
             InstrumentationRegistry.getInstrumentation().sendStatus(2, android.os.Bundle().apply {
                 putString("d15_restored_completion", "engine=${f.player.playbackState}, position=${f.player.currentPosition}, completed=${f.owner.isPlaybackCompleted}")
             })
             assertEquals(it.getString(R.string.playback_completed), it.findViewById<android.widget.TextView>(R.id.playback_status).text.toString())
+            it.findViewById<View>(R.id.btn_overlay_play_pause).performClick()
+            assertReplayStarted(f)
+        }
+        awaitReplay(scenario, f)
+    }
+
+    @Test fun restoringCompletedSnapshotOneMillisecondBeforeEndStillRestartsAtZero() = withPlayback { scenario, f ->
+        end(scenario, f)
+        scenario.onActivity {
+            f.owner.restorePlaybackPosition(2, f.player.currentPosition - 1, wasCompleted = true)
+            assertTrue(f.owner.isPlaybackCompleted)
+            assertFalse(f.player.playWhenReady)
             it.findViewById<View>(R.id.btn_overlay_play_pause).performClick()
             assertReplayStarted(f)
         }

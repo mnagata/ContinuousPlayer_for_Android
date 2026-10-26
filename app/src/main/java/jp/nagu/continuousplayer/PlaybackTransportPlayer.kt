@@ -104,6 +104,17 @@ internal class PlaybackTransportPlayer(
         }
     }
 
+    /** Restoring a snapshot is distinct from the user seeking away from the end. */
+    fun restorePosition(mediaItemIndex: Int, positionMs: Long, wasCompleted: Boolean) {
+        val item = delegate.currentMediaItem
+        seekTo(mediaItemIndex, positionMs)
+        if (wasCompleted && item != null && mediaItemIndex == delegate.currentMediaItemIndex && item == delegate.currentMediaItem) {
+            completedIndex = mediaItemIndex
+            completedItem = item
+            completedPosition = delegate.currentPosition
+        }
+    }
+
     override fun seekToDefaultPosition() {
         if (canSeek(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)) {
             clearCompletion()

@@ -75,6 +75,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dlnaBrowser: DlnaBrowser
     private lateinit var safBrowser: SafFileBrowser
     private var playbackErrorDialog: AlertDialog? = null
+    private var pendingPlaybackError: PendingPlaybackError? = null
+    private data class PendingPlaybackError(
+        val controller: PlayerController,
+        val error: androidx.media3.common.PlaybackException,
+        val mediaIndex: Int,
+        val mediaItem: androidx.media3.common.MediaItem?
+    )
     private val playbackModalDialogs = mutableSetOf<AlertDialog>()
     private var userPaused = false
     private var audioOnlyMedia = false
@@ -99,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         val positionMs: Long,
         val playWhenReady: Boolean,
         val focusedView: View?,
+        val wasCompleted: Boolean = false,
         var interrupted: Boolean = false,
         var restoring: Boolean = false
     )
@@ -428,7 +436,8 @@ class MainActivity : AppCompatActivity() {
     private fun retainPlayback(controller: PlayerController): RetainedPlayback {
         val player = controller.player
         return RetainedPlayback(controller, viewModel.videos, viewModel.playbackFolder,
-            player.currentMediaItemIndex, player.currentPosition, player.playWhenReady, currentFocus)
+            player.currentMediaItemIndex, player.currentPosition, player.playWhenReady, currentFocus,
+            wasCompleted = controller.isPlaybackCompleted)
     }
 
     private fun ownsRetainedPlayback(state: RetainedPlayback) =
@@ -461,7 +470,11 @@ class MainActivity : AppCompatActivity() {
             viewModel.videos = selection.videos
             viewModel.playbackFolder = selection.folder
             val player = selection.controller.player
-            player.seekTo(selection.mediaIndex, selection.positionMs)
+            // An error is already stopped at its failing position; restoring the old
+            // snapshot must not clear that error or rewind it before the user decides.
+            if (pendingPlaybackError == null && player.playerError == null) {
+                selection.controller.restorePlaybackPosition(selection.mediaIndex, selection.positionMs, selection.wasCompleted)
+            }
             val requiresManualResume = selection.interrupted || isInBackground || !accessible ||
                 player.playerError != null
             val resume = selection.playWhenReady && !requiresManualResume
@@ -475,13 +488,14 @@ class MainActivity : AppCompatActivity() {
             if (wasInformation && !selection.playWhenReady && !requiresManualResume) {
                 selection.focusedView?.takeIf { it.isShown }?.requestFocus()
             }
-            if (!accessible && !isInBackground) {
+            if (!accessible && !isInBackground && pendingPlaybackError == null) {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle(R.string.playback_failed)
                     .setMessage(R.string.playback_source_unavailable)
                     .setPositiveButton(android.R.string.ok, null)
                     .showPlaybackModal()
             }
+            presentPendingPlaybackError()
         }
     }
 
@@ -575,10 +589,12 @@ class MainActivity : AppCompatActivity() {
         lastPlaybackFolder.save(viewModel.playbackFolder)
         stopPlayback()
         showPlayer()
-        val controller = PlayerController(
+        lateinit var controller: PlayerController
+        controller = PlayerController(
             this,
-            onPlaybackFailure = if (isTelevision || videos.any { it.uri.startsWith("http") })
-                ({ error -> showPlaybackError(error) }) else null,
+            onPlaybackFailure = { error ->
+                if (playerController === controller) showPlaybackError(error)
+            },
             onPlaybackInterrupted = {
                 playbackSelection?.interrupted = true
                 playbackInformation?.interrupted = true
@@ -616,6 +632,9 @@ class MainActivity : AppCompatActivity() {
                 mediaItem: androidx.media3.common.MediaItem?,
                 reason: Int
                    ) {
+                pendingPlaybackError = null
+                playbackErrorDialog?.dismiss()
+                playbackErrorDialog = null
                 audioOnlyMedia = false
                 Log.d(TAG, "onMediaItemTransition: mediaItem=$mediaItem, reason=$reason")
                 updatePortraitVideoInfo()
@@ -700,6 +719,7 @@ class MainActivity : AppCompatActivity() {
           }
 
     private fun stopPlayback() {
+        pendingPlaybackError = null
         pointerControls?.release()
         pointerControls = null
         gestureHandler?.cancel()
@@ -726,11 +746,30 @@ class MainActivity : AppCompatActivity() {
           }
 
     private fun showPlaybackError(error: androidx.media3.common.PlaybackException) {
-        if (isFinishing || isDestroyed) return
-        val player = playerController?.player ?: return
+        val controller = playerController ?: return
+        playbackSelection?.interrupted = true
+        playbackInformation?.interrupted = true
         userPaused = true
-        player.pause()
+        controller.player.pause()
+        pendingPlaybackError = PendingPlaybackError(controller, error,
+            controller.player.currentMediaItemIndex, controller.player.currentMediaItem)
         updatePauseOverlay()
+        presentPendingPlaybackError()
+    }
+
+    private fun presentPendingPlaybackError() {
+        val pending = pendingPlaybackError ?: return
+        val controller = playerController
+        if (controller !== pending.controller || controller.player.currentMediaItemIndex != pending.mediaIndex ||
+            controller.player.currentMediaItem != pending.mediaItem) {
+            pendingPlaybackError = null
+            return
+        }
+        if (isFinishing || isDestroyed || isInBackground || !window.decorView.hasWindowFocus() ||
+            playbackSelection != null || playbackInformation != null || playbackModalDialogs.isNotEmpty()) return
+        pendingPlaybackError = null
+        val player = controller.player
+        val error = pending.error
         val filename = viewModel.videos.getOrNull(player.currentMediaItemIndex)?.displayName.orEmpty()
         val details = buildString {
             appendLine(filename)
@@ -766,7 +805,9 @@ class MainActivity : AppCompatActivity() {
         dialog.setOnKeyListener { _, key, _ -> PlaybackInput.isMediaTransportKey(key) }
         dialog.setOnDismissListener {
             playbackModalDialogs.remove(dialog)
+            if (playbackErrorDialog === dialog) playbackErrorDialog = null
             updateExternalPlaybackCommands()
+            presentPendingPlaybackError()
         }
         // Block before attaching the window; focus loss arrives on a later UI dispatch.
         updateExternalPlaybackCommands()
@@ -1039,6 +1080,7 @@ private fun updatePortraitVideoInfo() {
         if (hasFocus && ::viewModel.isInitialized && viewModel.isPlayerScreen && playbackSelection == null && playbackInformation == null) {
             enterImmersiveMode()
                }
+        if (hasFocus) presentPendingPlaybackError()
           }
 
     override fun onStop() {
@@ -1060,6 +1102,7 @@ private fun updatePortraitVideoInfo() {
         super.onStart()
         isInBackground = false
         updatePauseOverlay()
+        presentPendingPlaybackError()
           }
 
     override fun onDestroy() {

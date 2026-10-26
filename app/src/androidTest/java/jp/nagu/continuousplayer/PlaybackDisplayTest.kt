@@ -144,6 +144,7 @@ class PlaybackDisplayTest {
     }
 
     @Test fun localFinalErrorShowsTitleStatusAndControls() = withPlayback(broken = true) { scenario, fixture ->
+        dismissError(scenario, fixture)
         scenario.onActivity { activity ->
             assertNotNull(fixture.player.playerError)
             assertTrue(fixture.overlay.isShown)
@@ -155,6 +156,7 @@ class PlaybackDisplayTest {
     }
 
     @Test fun errorRemainsVisibleAfterBackgroundReturn() = withPlayback(broken = true) { scenario, fixture ->
+        dismissError(scenario, fixture)
         scenario.moveToState(Lifecycle.State.CREATED)
         scenario.moveToState(Lifecycle.State.RESUMED)
         BrowserTestUi.waitUntil { fixture.playerView.rootView.hasWindowFocus() }
@@ -240,6 +242,11 @@ class PlaybackDisplayTest {
         R.id.btn_overlay_previous, R.id.btn_overlay_rewind, R.id.btn_overlay_play_pause, R.id.btn_overlay_forward, R.id.btn_overlay_next)
     private data class Fixture(val playerView: PlayerView, val player: Player, val overlay: View, val videos: List<VideoItem>)
     private fun infoWindow() = WindowInspector.getGlobalWindowViews().singleOrNull { it.findViewById<View>(R.id.info_close) != null }
+    private fun dismissError(scenario: ActivityScenario<MainActivity>, fixture: Fixture) {
+        BrowserTestUi.waitUntil { errorDialog(scenario)?.window?.decorView?.hasWindowFocus() == true }
+        scenario.onActivity { errorDialogOnMain(it)!!.getButton(AlertDialog.BUTTON_NEUTRAL).performClick() }
+        BrowserTestUi.waitUntil { fixture.playerView.rootView.hasWindowFocus() }
+    }
     private fun errorDialogOnMain(activity: MainActivity) = MainActivity::class.java.getDeclaredField("playbackErrorDialog").apply { isAccessible = true }.get(activity) as? AlertDialog
     private fun errorDialog(scenario: ActivityScenario<MainActivity>): AlertDialog? { var result: AlertDialog? = null;scenario.onActivity { result = errorDialogOnMain(it) };return result }
     private fun withTouchExploration(action: () -> Unit) {

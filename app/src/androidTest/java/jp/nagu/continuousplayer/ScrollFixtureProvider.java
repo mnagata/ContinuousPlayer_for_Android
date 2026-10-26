@@ -54,6 +54,7 @@ public class ScrollFixtureProvider extends DocumentsProvider {
     }
 
     @Override public ParcelFileDescriptor openDocument(String id, String mode, CancellationSignal signal) throws FileNotFoundException {
+        if (id.equals("d25-denied")) throw new SecurityException("D25 provider denied read access");
         throw new FileNotFoundException("The test selects a file without decoding it");
     }
 

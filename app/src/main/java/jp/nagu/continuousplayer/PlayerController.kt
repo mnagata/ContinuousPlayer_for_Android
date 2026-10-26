@@ -23,7 +23,7 @@ import androidx.media3.session.SessionCommands
  *
  * [MediaSession] を保持しており、Bluetoothリモコン等のメディアボタンイベントを
  * ExoPlayerに自動的にルーティングする。
- * 再生エラー発生時は自動的に次のトラックへスキップする。
+ * 再生エラーでは同じ項目を一時停止し、再開先は明示操作で決める。
  * 使用後は [release] を呼んでリソースを解放すること。
  */
 @OptIn(UnstableApi::class)
@@ -37,7 +37,6 @@ class PlayerController(
 
     companion object {
         private const val TAG = "PlayerController"
-        private const val MAX_ERROR_COUNT = 3
         }
 
     private val audioMonitor = PlaybackAudioMonitor(context.applicationContext, ::interruptPlayback)
@@ -68,6 +67,10 @@ class PlayerController(
     }
     val player: Player = transportPlayer
     val isPlaybackCompleted: Boolean get() = transportPlayer.isCompleted
+
+    internal fun restorePlaybackPosition(mediaIndex: Int, positionMs: Long, wasCompleted: Boolean) {
+        transportPlayer.restorePosition(mediaIndex, positionMs, wasCompleted)
+    }
 
     val videoFormat get() = engine.videoFormat
     val audioFormat get() = engine.audioFormat
@@ -121,33 +124,14 @@ class PlayerController(
         }
     }
 
-    private var errorCount = 0
-
     private val errorListener = object : Player.Listener {
         override fun onPlayerError(error: PlaybackException) {
             Log.e(TAG, "Playback failed: ${error.errorCodeName}", error)
-            // A TV without ADB needs a visible error instead of silently skipping files.
-            if (onPlaybackFailure != null) {
-                onPlaybackFailure.invoke(error)
-                return
-            }
-            errorCount++
-            Log.e(TAG, "Playback error ($errorCount/$MAX_ERROR_COUNT): ${error.message}")
-            if (errorCount >= MAX_ERROR_COUNT) {
-                Log.w(TAG, "Max errors reached, stopping playback")
-                errorCount = 0
-                return
-                }
-            val current = player.currentMediaItemIndex
-            if (current < player.mediaItemCount - 1) {
-                player.seekToDefaultPosition(current + 1)
-                player.prepare()
-              } else {
-                Log.w(TAG, "Playback error on last track, stopping")
-                errorCount = 0
-                }
-             }
-           }
+            // Apply the stop policy even when no UI callback is installed.
+            player.pause()
+            onPlaybackFailure?.invoke(error)
+        }
+    }
 
     init {
         player.addListener(errorListener)
@@ -218,7 +202,6 @@ class PlayerController(
 
         /** プレーヤーおよびMediaSessionのリソースを解放する。 */
     fun release() {
-        errorCount = 0
         audioMonitor.release()
         player.removeListener(errorListener)
         mediaSession.release()
