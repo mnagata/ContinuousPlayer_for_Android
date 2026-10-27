@@ -70,26 +70,7 @@
                     android:text="@string/home_select"
                     android:textAllCaps="false"
                     android:textColor="#FFFFFF"
-                    android:textSize="17sp"
-                    android:nextFocusDown="@id/btn_home_more" />
-
-                <Button
-                    android:id="@+id/btn_home_more"
-                    android:layout_width="wrap_content"
-                    android:minWidth="280dp"
-                    android:maxWidth="280dp"
-                    android:layout_height="wrap_content"
-                    android:minHeight="48dp"
-                    android:paddingVertical="8dp"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/home_secondary_button"
-                    android:backgroundTint="@null"
-                    app:backgroundTint="@null"
-                    android:text="@string/home_more"
-                    android:tooltipText="@string/home_more"
-                    android:textAllCaps="false"
-                    android:textColor="#CED4ED"
-                    android:nextFocusUp="@id/btn_select_folder" />
+                    android:textSize="17sp" />
 
                 <TextView
                     android:id="@+id/tv_controls_hint"

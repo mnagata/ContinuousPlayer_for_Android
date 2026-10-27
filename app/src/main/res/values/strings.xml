@@ -2,7 +2,6 @@
     <string name="app_name">ContinuousPlayer</string>
     <string name="select_folder">ファイル一覧</string>
     <string name="select_file">ファイル一覧</string>
-    <string name="exit_app">アプリを終了</string>
     <string name="media_name_format">名前・形式</string>
     <string name="media_original_name">元の名前</string>
     <string name="media_format">形式</string>

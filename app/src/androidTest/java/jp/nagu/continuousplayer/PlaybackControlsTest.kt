@@ -217,7 +217,6 @@ class PlaybackControlsTest {
                 assertEquals(label, button.tooltipText.toString())
             }
             assertEquals("再生", it.findViewById<View>(R.id.btn_overlay_play_pause).contentDescription.toString())
-            it.findViewById<View>(R.id.btn_home_more).performClick() // A stale hidden-home action is inert.
             assertFalse(it.isFinishing)
             assertSame(fixture.player, fixture.playerView.player)
         }
