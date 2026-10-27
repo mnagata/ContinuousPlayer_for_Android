@@ -5,6 +5,9 @@ import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.CancellationSignal;
 import android.os.ParcelFileDescriptor;
+import android.os.Bundle;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsProvider;
 import java.io.FileNotFoundException;
@@ -14,6 +17,28 @@ import java.util.Locale;
 public class ScrollFixtureProvider extends DocumentsProvider {
     public static final Uri tree = DocumentsContract.buildTreeDocumentUri("jp.nagu.continuousplayer.test.scroll", "root");
     private static final String[] COLUMNS = {"document_id", "_display_name", "mime_type", "_size", "last_modified"};
+
+    private volatile String blockedFolder;
+    private volatile boolean failAfterRelease;
+    private volatile boolean queryStarted;
+    private volatile CountDownLatch queryRelease = new CountDownLatch(0);
+
+    @Override public Bundle call(String method, String arg, Bundle extras) {
+        Bundle result = new Bundle();
+        if (method.equals("d22-prepare")) {
+            queryRelease.countDown();
+            queryStarted = false;
+            failAfterRelease = extras != null && extras.getBoolean("fail");
+            queryRelease = new CountDownLatch(1);
+            blockedFolder = arg;
+        } else if (method.equals("d22-release")) {
+            blockedFolder = null;
+            queryRelease.countDown();
+        } else if (method.equals("d22-state")) {
+            result.putBoolean("started", queryStarted);
+        } else return super.call(method, arg, extras);
+        return result;
+    }
 
     @Override public boolean onCreate() { return true; }
 
@@ -37,7 +62,22 @@ public class ScrollFixtureProvider extends DocumentsProvider {
 
     @Override public Cursor queryChildDocuments(String parent, String[] projection, String sortOrder) {
         MatrixCursor cursor = new MatrixCursor(COLUMNS);
-        if (parent.equals("d21-format")) {
+        if (parent.equals(blockedFolder)) {
+            CountDownLatch release = queryRelease;
+            boolean fail = failAfterRelease;
+            queryStarted = true;
+            try {
+                if (!release.await(15, TimeUnit.SECONDS)) throw new IllegalStateException("D22 query gate timed out");
+            } catch (InterruptedException error) { Thread.currentThread().interrupt();throw new IllegalStateException(error); }
+            if (fail) throw new IllegalStateException("D22 late provider error");
+        }
+        if (parent.startsWith("d22-source")) {
+            if (parent.equals("d22-source")) for (int i = 0; i < 40; i++) {
+                cursor.addRow(new Object[]{parent + String.format(Locale.ROOT, "/child-%02d", i),
+                    String.format(Locale.ROOT, "Child %02d", i), DocumentsContract.Document.MIME_TYPE_DIR, 0L, 0L});
+            }
+            cursor.addRow(new Object[]{parent + "/media", "Sample OP.mp4", "video/mp4", 1L, 0L});
+        } else if (parent.equals("d21-format")) {
             cursor.addRow(new Object[]{"d21-format/mp4", "Episode.part.1.mp4", "video/mp4", 1L, 0L});
             cursor.addRow(new Object[]{"d21-format/m4v", "Episode.part.1.m4v", "video/mp4", 1L, 0L});
         } else if (parent.equals("root")) {

@@ -11,6 +11,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** SAF supplies access; the shared DLNA dialog supplies file selection and navigation. */
@@ -322,6 +324,7 @@ class SafFileBrowser(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
                 Log.e("SafFileBrowser", "SAF browsing failed", error)
                 showDialog(DlnaDialogContent(
                     title = activity.getString(R.string.saf_read_error),

@@ -67,7 +67,7 @@ internal class DlnaSelectionDialog(
     private var content: DlnaDialogContent
 ) : ComponentDialog(activity) {
     private lateinit var list: ListView
-    private var awaitingDirectory = false
+    private var awaitingDirectory = content.loading
     private var mediaInformation: DlnaSelectionDialog? = null
     private var playbackCloseToken: Any? = null
     private val loadingHandler = Handler(Looper.getMainLooper())
@@ -140,14 +140,14 @@ internal class DlnaSelectionDialog(
         closeMediaInformation()
         clearPendingProgress()
         playbackCloseToken = null
-        awaitingDirectory = false
+        awaitingDirectory = next.loading
         content = next
         renderContent()
         if (isShowing) focusSelection()
     }
 
     /** Keep the current list and scroll position visible until navigation finishes. */
-    fun keepListWhileLoading(onClose: (() -> Unit)? = null, showLoadingIndicator: Boolean = false): Boolean {
+    fun keepListWhileLoading(onClose: (() -> Unit)? = null, showLoadingIndicator: Boolean = true): Boolean {
         if (!isShowing || (content.rows.isEmpty() && !content.fileSelection)) return false
         closeMediaInformation()
         clearPendingProgress()
@@ -165,7 +165,7 @@ internal class DlnaSelectionDialog(
     }
 
     fun closeAfterPlaybackFrame(onClose: () -> Unit) {
-        keepListWhileLoading()
+        keepListWhileLoading(showLoadingIndicator = false)
         val token = Any().also { playbackCloseToken = it }
         activity.afterNextContentFrame {
             // Cancellation or new navigation can supersede this selection before drawing.
@@ -190,6 +190,7 @@ internal class DlnaSelectionDialog(
     @SuppressLint("ClickableViewAccessibility") // Pointer context action shares the native accessible long-click.
     private fun renderContent() {
         val current = content
+        fun canInteract() = isShowing && content === current && !awaitingDirectory
         findViewById<TextView>(R.id.dlna_label).apply {
             visibility = if (current.label == null) View.GONE else View.VISIBLE
             current.label?.let { setText(it) }
@@ -211,23 +212,24 @@ internal class DlnaSelectionDialog(
                 width = if (current.fileSelection) (48 * activity.resources.displayMetrics.density).toInt()
                     else ViewGroup.LayoutParams.MATCH_PARENT
             }
-            setOnClickListener { current.onUp?.invoke() }
+            setOnClickListener { if (canInteract()) current.onUp?.invoke() }
         }
         val refresh = findViewById<Button>(R.id.dlna_refresh).apply {
             visibility = if (current.onRefresh != null) View.VISIBLE else View.GONE
             text = if (current.fileSelection) "" else activity.getString(current.refreshLabel)
             contentDescription = activity.getString(current.refreshLabel)
             setCompoundDrawablesRelativeWithIntrinsicBounds(if (current.fileSelection) R.drawable.ic_browser_refresh else 0, 0, 0, 0)
-            setOnClickListener { current.onRefresh?.invoke() }
+            setOnClickListener { if (canInteract()) current.onRefresh?.invoke() }
         }
         val close = findViewById<Button>(R.id.dlna_close).apply {
             setText(current.closeLabel ?: if (current.fileSelection) R.string.file_browser_cancel else R.string.dlna_close)
-            setOnClickListener { dismiss(); content.onClose() }
+            // Loading can replace only onClose without rebuilding this button.
+            setOnClickListener { if (isShowing) { dismiss(); content.onClose() } }
         }
         val register = findViewById<Button>(R.id.dlna_register).apply {
             visibility = if (current.onRegister == null) View.GONE else View.VISIBLE
             setText(current.registerLabel)
-            setOnClickListener { current.onRegister?.invoke() }
+            setOnClickListener { if (canInteract()) current.onRegister?.invoke() }
         }
         val details = findViewById<Button>(R.id.dlna_details).apply {
             visibility = if (current.fileSelection && current.rows.isNotEmpty()) View.VISIBLE else View.GONE
@@ -318,10 +320,10 @@ internal class DlnaSelectionDialog(
             nextFocusUpId = (topActions.firstOrNull() ?: bottomActions.first()).id
             nextFocusDownId = bottomActions.firstOrNull()?.id ?: id
             setOnItemClickListener { _, _, position, _ ->
-                if (!awaitingDirectory) current.onSelected(position)
+                if (isShowing && content === current && !awaitingDirectory) current.onSelected(position)
             }
             setOnItemLongClickListener { _, _, position, _ ->
-                if (awaitingDirectory) false
+                if (!isShowing || content !== current || awaitingDirectory) false
                 else current.onLongSelected?.let { it(position); true }
                     ?: if (current.fileSelection) { showMediaInformation(current, position);true } else false
             }
@@ -338,7 +340,7 @@ internal class DlnaSelectionDialog(
                 if (current.onMoreSelected != null) return@setOnTouchListener false
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     contextPress = event.isPointerInput() && event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)
-                    if (contextPress && !awaitingDirectory) {
+                    if (contextPress && canInteract()) {
                         val position = pointToPosition(event.x.toInt(), event.y.toInt())
                         if (position != ListView.INVALID_POSITION) {
                             if (current.onLongSelected != null) current.onLongSelected.invoke(position)
@@ -391,7 +393,7 @@ internal class DlnaSelectionDialog(
     private fun focusRow(current: DlnaDialogContent, position: Int) {
         val currentList = list
         currentList.post {
-            if (isShowing && content === current && list === currentList) {
+            if (isShowing && content === current && list === currentList && !awaitingDirectory) {
                 // Focus the list first so an old focused child cannot keep the old row selected.
                 currentList.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 if (isTv() || current.onMoreSelected != null) currentList.requestFocusFromTouch()
@@ -399,7 +401,7 @@ internal class DlnaSelectionDialog(
                 currentList.setSelectionFromTop(position, 0)
                 currentList.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
                 if (current.onMoreSelected != null) currentList.doOnPreDraw {
-                    if (isShowing && content === current && list === currentList && currentList.selectedItemPosition == position) {
+                    if (isShowing && content === current && list === currentList && !awaitingDirectory && currentList.selectedItemPosition == position) {
                         val open = currentList.selectedView?.findViewById<View>(R.id.saved_folder_open)
                         if (!currentList.isInTouchMode) open?.requestFocus()
                     }
@@ -410,6 +412,10 @@ internal class DlnaSelectionDialog(
 
     private fun focusSelection() {
         val current = content
+        if (awaitingDirectory) {
+            findViewById<View>(R.id.dlna_close).requestFocusFromTouch()
+            return
+        }
         if (current.rows.isNotEmpty()) focusRow(current, current.initialSelection.coerceIn(current.rows.indices))
         else {
             val action = findViewById<View>(current.initialActionFocus ?: if (current.onRegister != null) R.id.dlna_register

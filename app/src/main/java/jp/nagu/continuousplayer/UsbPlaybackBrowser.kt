@@ -11,6 +11,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** Registered USB folders use the same file-selection window as SAF and DLNA. */
@@ -138,6 +140,7 @@ internal class UsbPlaybackBrowser(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
                 android.util.Log.e("UsbPlaybackBrowser", "USB browsing failed", error)
                 show(DlnaDialogContent(title = directory.name, label = null,
                     message = "${activity.getString(R.string.usb_read_error)}\n\n${error.message.orEmpty()}",

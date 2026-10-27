@@ -9,6 +9,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -223,6 +225,7 @@ class UsbFileBrowser(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
                 android.util.Log.e("UsbFileBrowser", "USB selection failed", error)
                 show(DlnaDialogContent(title = title, label = null, fileSelection = true,
                     message = "${activity.getString(R.string.usb_read_error)}\n\n${error.javaClass.simpleName}: ${error.message.orEmpty()}",

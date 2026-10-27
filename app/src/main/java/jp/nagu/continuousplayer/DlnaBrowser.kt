@@ -10,6 +10,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** Server and ContentDirectory browser shared by touch and D-pad screens. */
@@ -227,7 +229,7 @@ class DlnaBrowser(
     private fun load(message: Int, retry: () -> Unit, action: suspend () -> Unit) {
         // Cancel only the old request. Keep the browser window attached while changing content.
         job?.cancel()
-        if (dialog?.keepListWhileLoading(onClose = { cancel() }, showLoadingIndicator = true) != true) showDialog(DlnaDialogContent(
+        if (dialog?.keepListWhileLoading(onClose = { cancel() }) != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.dlna_dialog_label),
             message = activity.getString(message),
             loading = true,
@@ -238,6 +240,7 @@ class DlnaBrowser(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
                 Log.e("DlnaBrowser", "DLNA browsing failed", error)
                 showDialog(DlnaDialogContent(
                     title = activity.getString(R.string.dlna_error),
