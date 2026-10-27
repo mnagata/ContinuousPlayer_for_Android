@@ -30,6 +30,11 @@ class DlnaBrowser(
     private var servers = emptyList<DlnaServer>()
     private var dialog: DlnaSelectionDialog? = null
     private var job: Job? = null
+    private data class SavedTarget(val folder: SavedDlnaFolder, val focusMediaId: String?)
+    private var savedTarget: SavedTarget? = null
+    private var manualAddress = ""
+    private var discoveryNotice: String? = null
+    private val manualServers = linkedMapOf<String, DlnaServer>()
     internal var selectedFolder: PlaybackFolder.Dlna? = null
         private set
 
@@ -42,6 +47,10 @@ class DlnaBrowser(
         navigationRoot = null
         registering = false
         onRegistered = null
+        savedTarget = null
+        manualServers.clear()
+        discoveryNotice = null
+        servers = emptyList()
     }
 
     private fun cancel() {
@@ -59,6 +68,7 @@ class DlnaBrowser(
         navigationRoot = null
         registering = false
         onRegistered = null
+        savedTarget = null
         return dialog.also { dialog = null }
     }
 
@@ -84,8 +94,17 @@ class DlnaBrowser(
     }
 
     private fun refreshServers() {
-        load(R.string.dlna_searching, retry = { refreshServers() }) {
-            servers = discoverServers()
+        load(R.string.dlna_searching, retry = { refreshServers() }, onManualAddress = { showManualAddress() }) {
+            discoveryNotice = null
+            val found = try { discoverServers() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                Log.w("DlnaBrowser", "Automatic discovery unavailable", error)
+                discoveryNotice = activity.getString(R.string.dlna_discovery_unavailable)
+                emptyList()
+            }
+            servers = (found + manualServers.values).distinctBy { it.id }
             showServers()
         }
     }
@@ -93,6 +112,8 @@ class DlnaBrowser(
     fun openSaved(folder: SavedDlnaFolder, focusMediaId: String? = null, onReturn: (SavedDlnaFolder) -> Unit) {
         registering = false
         onRegistered = null
+        if (savedTarget?.folder?.serverId != folder.serverId) manualAddress = savedFolders.addressFor(folder.serverId).orEmpty()
+        savedTarget = SavedTarget(folder, focusMediaId)
         // A playback directory may lie below a saved root; direct saved selections match themselves.
         val root = savedFolders.all().filter { candidate ->
             candidate.serverId == folder.serverId && candidate.path.size <= folder.path.size &&
@@ -100,10 +121,16 @@ class DlnaBrowser(
         }.maxByOrNull { it.path.size } ?: folder
         navigationRoot = root
         returnToSavedFolders = { onReturn(root) }
-        load(R.string.dlna_searching, retry = { openSaved(folder, focusMediaId, onReturn) }) {
-            servers = discoverServers()
-            val server = servers.firstOrNull { it.id == folder.serverId }
-                ?: throw java.io.IOException(activity.getString(R.string.dlna_saved_server_missing, folder.serverName))
+        load(R.string.dlna_searching, retry = { openSaved(folder, focusMediaId, onReturn) },
+            onManualAddress = { showManualAddress() }) {
+            val address = savedFolders.addressFor(folder.serverId)
+            val server = if (address != null) withContext(Dispatchers.IO) { client.connect(address) }.also {
+                if (it.id != folder.serverId) throw java.io.IOException(activity.getString(R.string.dlna_wrong_server))
+            } else {
+                servers = discoverServers()
+                servers.firstOrNull { it.id == folder.serverId }
+                    ?: throw java.io.IOException(activity.getString(R.string.dlna_saved_server_missing, folder.serverName))
+            }
             showDirectory(server, folder.path.mapIndexed { index, entry ->
                 DlnaEntry(entry.id, if (index == 0) server.name else entry.title)
             }, focusMediaId)
@@ -128,6 +155,54 @@ class DlnaBrowser(
         }
     }
 
+    private fun showManualAddress(message: String = activity.getString(R.string.dlna_address_help),
+        error: String? = null, retry: Boolean = false, connecting: Boolean = false) {
+        if (!connecting) { job?.cancel();job = null }
+        if (manualAddress.isBlank()) manualAddress = savedTarget?.let { savedFolders.addressFor(it.folder.serverId) }
+            ?: savedFolders.lastAddress()
+        showDialog(DlnaDialogContent(
+            title = activity.getString(R.string.dlna_address_title), label = null,
+            message = message, loading = connecting,
+            addressInput = DlnaAddressInput(manualAddress, error) { manualAddress = it },
+            registerLabel = if (retry) R.string.playback_retry else R.string.dlna_connect,
+            onRegister = { connectAddress() },
+            upLabel = if (savedTarget != null) R.string.saved_folder_list else R.string.dlna_choose_server,
+            onUp = { if (savedTarget != null) returnToSaved() else showServers() },
+            initialActionFocus = R.id.dlna_address,
+            closeLabel = R.string.file_browser_cancel, onClose = { cancel() }))
+    }
+
+    private fun connectAddress() {
+        if (runCatching { DlnaAddress.parse(manualAddress) }.isFailure) {
+            showManualAddress(error = activity.getString(R.string.dlna_address_invalid))
+            return
+        }
+        val address = manualAddress.trim()
+        val target = savedTarget
+        job?.cancel()
+        showManualAddress(message = activity.getString(R.string.dlna_connecting), connecting = true)
+        job = activity.lifecycleScope.launch {
+            try {
+                val server = withContext(Dispatchers.IO) { client.connect(address) }
+                if (target != null && server.id != target.folder.serverId)
+                    throw java.io.IOException(activity.getString(R.string.dlna_wrong_server))
+                server.descriptionUrl?.let { savedFolders.rememberAddress(server) }
+                manualServers[server.id] = server
+                servers = (servers.filterNot { it.id == server.id } + server)
+                val path = target?.folder?.path?.mapIndexed { index, item ->
+                    DlnaEntry(item.id, if (index == 0) server.name else item.title)
+                } ?: listOf(DlnaEntry("0", server.name))
+                showDirectory(server, path, target?.focusMediaId)
+                android.widget.Toast.makeText(activity, activity.getString(R.string.dlna_connected, server.name), android.widget.Toast.LENGTH_SHORT).show()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                showManualAddress(message = activity.getString(R.string.dlna_connect_failed) +
+                    "\n\n" + error.message.orEmpty().take(500), retry = true)
+            }
+        }
+    }
+
     private fun returnToSaved() {
         val onReturn = returnToSavedFolders ?: return
         onReturn()
@@ -137,10 +212,12 @@ class DlnaBrowser(
     private fun showServers(focusId: String? = null) {
         showDialog(DlnaDialogContent(
             title = activity.getString(R.string.dlna_choose_server),
-            summary = activity.getString(R.string.dlna_server_count, servers.size),
+            summary = activity.getString(R.string.dlna_server_count, servers.size) +
+                if (servers.isNotEmpty() && discoveryNotice != null) "\n$discoveryNotice" else "",
             rows = servers.map { DlnaRow(it.name, R.drawable.ic_dlna_server,
                 detail = activity.getString(R.string.dlna_server_detail, java.net.URI(it.controlUrl).host)) },
-            message = activity.getString(R.string.dlna_no_server),
+            message = discoveryNotice ?: activity.getString(R.string.dlna_no_server),
+            onManualAddress = { showManualAddress() },
             initialSelection = servers.indexOfFirst { it.id == focusId }.coerceAtLeast(0),
             upLabel = R.string.saved_folder_list,
             onUp = if (returnToSavedFolders != null) ({ returnToSaved() }) else null,
@@ -153,6 +230,8 @@ class DlnaBrowser(
     }
 
     private fun browse(server: DlnaServer, path: List<DlnaEntry>, focusId: String? = null) {
+        if (!registering) savedTarget = SavedTarget(SavedDlnaFolder(server.id, server.name,
+            path.map { SavedDlnaPath(it.id, it.title) }), focusId)
         load(R.string.dlna_loading, retry = { browse(server, path, focusId) }) {
             showDirectory(server, path, focusId)
         }
@@ -226,13 +305,14 @@ class DlnaBrowser(
         }
     }
 
-    private fun load(message: Int, retry: () -> Unit, action: suspend () -> Unit) {
+    private fun load(message: Int, retry: () -> Unit, onManualAddress: (() -> Unit)? = null, action: suspend () -> Unit) {
         // Cancel only the old request. Keep the browser window attached while changing content.
         job?.cancel()
-        if (dialog?.keepListWhileLoading(onClose = { cancel() }) != true) showDialog(DlnaDialogContent(
+        if (dialog?.keepListWhileLoading(onClose = { cancel() }, onManualAddress = onManualAddress) != true) showDialog(DlnaDialogContent(
             title = activity.getString(R.string.dlna_dialog_label),
             message = activity.getString(message),
             loading = true,
+            onManualAddress = onManualAddress,
             onClose = { cancel() }))
         job = activity.lifecycleScope.launch {
             try {
@@ -249,6 +329,7 @@ class DlnaBrowser(
                     onUp = if (returnToSavedFolders != null) ({ returnToSaved() }) else null,
                     refreshLabel = R.string.playback_retry,
                     onRefresh = retry,
+                    onManualAddress = { showManualAddress() },
                     onClose = { cancel() }))
             }
         }

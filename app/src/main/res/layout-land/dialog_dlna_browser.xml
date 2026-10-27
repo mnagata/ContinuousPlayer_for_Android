@@ -35,10 +35,20 @@
                 android:layout_width="32dp" android:layout_height="32dp" android:indeterminateTint="#66DFFF" android:visibility="gone" />
             <TextView android:id="@+id/dlna_message" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="8dp" android:textColor="#D8E3F2" android:textSize="16sp" android:lineSpacingExtra="4dp" />
+            <TextView android:id="@+id/dlna_address_label" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:text="@string/dlna_address_label" android:textColor="#FFFFFF"
+                android:textSize="16sp" android:labelFor="@id/dlna_address" android:visibility="gone" />
+            <EditText android:id="@+id/dlna_address" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:minHeight="48dp" android:singleLine="true" android:inputType="textUri" android:imeOptions="actionDone"
+                android:textColor="#FFFFFF" android:textColorHint="#B7C8DE" android:backgroundTint="#66DFFF"
+                android:importantForAutofill="no" android:visibility="gone" />
         </LinearLayout>
     </ScrollView>
     <TextView android:id="@+id/dlna_hint" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:textColor="#9BAFC9" android:textSize="12sp" android:visibility="gone" />
+    <Button android:id="@+id/dlna_manual_address" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="48dp" android:layout_marginTop="8dp" android:visibility="gone" android:text="@string/dlna_manual_address"
+        android:textAllCaps="false" android:textColor="#FFFFFF" android:background="@drawable/home_secondary_button" android:backgroundTint="@null" />
     <LinearLayout android:id="@+id/dlna_bottom_actions" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:baselineAligned="false"
         android:layout_marginTop="8dp" android:orientation="horizontal">

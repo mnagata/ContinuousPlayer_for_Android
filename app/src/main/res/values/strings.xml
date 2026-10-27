@@ -53,6 +53,17 @@
     <string name="dlna_choose_server">DLNAサーバーを選ぶ</string>
     <string name="dlna_searching">LAN内のDLNAサーバーを探しています…</string>
     <string name="dlna_loading">NASのフォルダーを読み込んでいます…</string>
+    <string name="dlna_manual_address">アドレスを指定して接続</string>
+    <string name="dlna_address_title">DLNAに接続</string>
+    <string name="dlna_address_label">サーバーのアドレス</string>
+    <string name="dlna_address_help">IPアドレス・ホスト名、またはDLNA機器情報のURL（http / https）を入力してください。例：192.168.1.10 / http://nas:8200/rootDesc.xml</string>
+    <string name="dlna_connect">接続</string>
+    <string name="dlna_connecting">接続しています…</string>
+    <string name="dlna_connected">「%1$s」に接続しました</string>
+    <string name="dlna_address_invalid">IPアドレス・ホスト名、または有効なhttp / httpsのURLを入力してください。</string>
+    <string name="dlna_connect_failed">接続できませんでした。アドレスとサーバーの状態を確認して、再試行してください。</string>
+    <string name="dlna_discovery_unavailable">この環境ではアドレスを入力して接続してください。</string>
+    <string name="dlna_wrong_server">登録先とは異なるサーバーです。登録したサーバーのアドレスを入力してください。</string>
     <string name="dlna_no_server">DLNAサーバーが見つかりません。同じLANに接続し、Synologyの「メディアサーバー」が起動していることを確認してください。NASのファイアウォール、DMA互換性のデバイス許可、Wi-Fiの端末間通信制限も確認してください。</string>
     <string name="dlna_empty">このフォルダーに再生できる動画・音声がありません。Synologyのインデックス対象フォルダーとインデックス作成状況を確認してください。</string>
     <string name="dlna_error">NASに接続できません</string>

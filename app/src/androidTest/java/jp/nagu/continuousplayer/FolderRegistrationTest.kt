@@ -89,7 +89,8 @@ class FolderRegistrationTest {
     @Test fun dlnaRetryKeepsRegistrationReturnAndFocus() = withFixture { f ->
         f.client.failing = true
         openAddition(f);choose(f, R.string.dlna_select)
-        awaitTitle(f, R.string.dlna_error)
+        awaitTitle(f, R.string.dlna_choose_server)
+        f.scenario.onActivity { assertTrue(window()!!.findViewById<View>(R.id.dlna_manual_address).isShown) }
         f.client.failing = false
         f.scenario.onActivity { window()!!.findViewById<View>(R.id.dlna_refresh).performClick() }
         finishDlnaRegistration(f);assertRegistered(f, Kind.DLNA, 4)

@@ -11,7 +11,8 @@ data class DlnaServer(
     val id: String,
     val name: String,
     val controlUrl: String,
-    val serviceType: String
+    val serviceType: String,
+    val descriptionUrl: String? = null
 )
 
 data class DlnaEntry(val id: String, val title: String, val media: VideoItem? = null)
@@ -44,7 +45,7 @@ internal object DlnaProtocol {
             return DlnaServer(
                 device.childText("UDN").ifBlank { location },
                 device.childText("friendlyName").ifBlank { URI(location).host },
-                resolve(base, control), service.childText("serviceType")
+                resolve(base, control), service.childText("serviceType"), location
             )
         }
         throw IOException("ContentDirectoryサービスが見つかりません")

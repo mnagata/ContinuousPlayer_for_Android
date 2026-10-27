@@ -469,6 +469,7 @@ Kotlinソースは `app/src/main/java/jp/nagu/continuousplayer/`、Manifestは `
 | SafDirectoryReaderTest | 不透明なdocument ID、ツリーURI、フォルダーとOP/ED順、空一覧、部分一覧・アクセスエラー |
 | DlnaSelectionDialogTest | D-pad、戻る／閉じる、縦横の登録ボタン・長い名前、SAF表示、ウィンドウ維持と初回サイズ |
 | BrowserLoadingTest | 各再生元の0.5秒表示・一覧維持、初回と取得中のキャンセル、遅い成功／失敗応答、TVフォーカス、再生復元 |
+| DlnaAddressConnectionTest | 探索中の手入力、入力保持・再試行、実HTTP接続と再接続、ID照合、TV・IME・再生復元、狭幅・拡大文字 |
 | SavedDlnaFoldersTest | 永続化、再登録の更新、サーバー単位のID、オフライン削除、壊れた保存データ |
 | UsbFolderBrowserTest | USBフォルダー選択・保存済み一覧への復帰・再表示・長押し登録解除、保存データ検証、追加・登録後の共通ウィンドウの階層移動・再読み込み・エラー復帰・再生選択 |
 | SavedFolderBrowserTest | 保存済み一覧からDLNA選択、追加先切り替え時のウィンドウ維持、長押し登録解除 |
@@ -492,6 +493,11 @@ Kotlinソースは `app/src/main/java/jp/nagu/continuousplayer/`、Manifestは `
 
 ## 14. DLNAクライアント
 
+- 「サーバー一覧」に「アドレスを指定して接続」を常設し、自動探索中も利用できる。マルチキャスト可能な稼働中インターフェースがない場合は自動探索を開始せず、探索エラーの場合も「この環境ではアドレスを入力して接続してください」と案内する。入力へ進む際は探索ジョブを取り消し、遅い探索結果で入力画面を上書きしない。
+- 手入力はIPアドレス・ホスト名、またはDLNA機器情報のhttp / https URLを受け付ける。ホスト名・IPだけの場合はその相手のUDP 1900へユニキャストM-SEARCHを約4秒、約1秒間隔で送信し、返されたLOCATIONを取得する。URLの場合はSSDPを使わず機器情報を直接取得する。URLのパスやポートを含む入力はhttpの省略にも対応する。機器情報にContentDirectoryがあることを検証してフォルダーを取得する。Web管理画面のURLをDLNA機器情報としては扱わない。
+- 入力画面も同じウィンドウとコンパクトな上部操作部を使用し、入力値とカーソル位置を構成更新後も保持する。Enter／IMEの完了／「接続」で送信し、接続中は入力・重複送信を無効化してキャンセルを維持する。失敗後は入力を残して「再試行」を表示する。Backspaceは編集中の文字削除に使い、待機中の戻るはサーバー一覧（登録先の再接続では保存済み一覧）へ、接続中の戻るはD22と同じキャンセルへ進む。
+- 手入力で機器情報とサーバーIDの確認に成功したURLは、saved_dlna_foldersのサーバーID別キーに保存する。フォルダー登録のID・パスのJSONは変更せず、接続だけではフォルダーを自動登録しない。このURLがある登録先は次回から探索を経ずに直接接続し、同じサーバーIDを確認して元のオブジェクトID・現在ファイルを開く。URLがない既存の登録先は従来どおり探索する。接続失敗・ID不一致でも登録は削除せず、アドレスを修正して再試行できる。解除後も再生元への再接続に使用できるよう、接続先の記録は残す。
+- ユニキャスト接続は[UPnP Device Architecture 2.0 §1.3.2](https://openconnectivity.org/upnp-specs/UPnP-arch-DeviceArchitecture-v2.0-20200417.pdf)のHOST指定・M-SEARCHに基づく。ホスト指定で応答しない機器は機器情報のURLを入力する。
 - 対象はSynology「メディアサーバー」などのUPnP AV MediaServer。同一LAN内でSSDP M-SEARCHを約4秒間、約1.5秒間隔で送受信し、最大32件のLOCATIONからデバイス記述とContentDirectoryを取得する。探索後に記述を順次取得するため、全体の所要時間は4秒に限定されない。UDNで重複を除外し、UDNがない場合はLOCATIONをIDに使う。この場合はIP変更後の登録先照合を保証できない。
 - オブジェクトID `0` をルートとし、SOAP BrowseDirectChildrenをRequestedCount=200で取得する。次ページの位置はフィルター後の件数ではなくNumberReturnedに基づく。同一ページの繰り返しや不完全な応答はエラーとする。
 - DIDL-Liteのcontainerとitemを表示する。HTTP(S)・http-get・audio/video MIMEのリソースを再生対象とし、application/octet-streamまたはワイルドカードMIMEでは既存の拡張子判定を使用する。`._`項目は除外する。

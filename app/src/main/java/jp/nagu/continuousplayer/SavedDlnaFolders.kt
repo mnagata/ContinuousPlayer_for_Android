@@ -9,7 +9,7 @@ data class SavedDlnaFolder(val serverId: String, val serverName: String, val pat
     val title: String get() = path.last().title
 }
 
-/** Store identities and navigation paths; reconnect using discovery rather than a saved IP. */
+/** Store identities/paths and explicitly connected device-description addresses. */
 internal class SavedDlnaFolders(context: Context) {
     private val preferences = context.getSharedPreferences("saved_dlna_folders", Context.MODE_PRIVATE)
     private val gson = Gson()
@@ -23,6 +23,17 @@ internal class SavedDlnaFolders(context: Context) {
                 }.getOrDefault(false)
             }.distinctBy { it.serverId to it.folderId }
     }.getOrDefault(emptyList())
+
+    fun addressFor(serverId: String): String? = preferences.getString("address:$serverId", null)
+        ?.takeIf { runCatching { DlnaAddress.parse(it) is DlnaAddress.Description }.getOrDefault(false) }
+
+    fun lastAddress(): String = preferences.getString("last_address", "").orEmpty()
+
+    fun rememberAddress(server: DlnaServer) {
+        val address = requireNotNull(server.descriptionUrl)
+        require(DlnaAddress.parse(address) is DlnaAddress.Description)
+        preferences.edit().putString("address:${server.id}", address).putString("last_address", address).apply()
+    }
 
     fun contains(serverId: String, folderId: String) = all().any {
         it.serverId == serverId && it.folderId == folderId

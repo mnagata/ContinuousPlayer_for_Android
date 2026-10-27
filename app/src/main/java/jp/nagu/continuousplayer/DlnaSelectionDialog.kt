@@ -15,6 +15,10 @@ import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
 import android.widget.AdapterView
+import android.widget.EditText
+import android.text.TextWatcher
+import android.text.Editable
+import android.view.inputmethod.EditorInfo
 import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.ImageView
@@ -37,6 +41,8 @@ internal data class DlnaRow(
     val formatBadge: String? = null
 )
 
+internal data class DlnaAddressInput(val value: String, val error: String? = null, val onChanged: (String) -> Unit)
+
 internal data class DlnaDialogContent(
     val title: String,
     val label: Int? = R.string.dlna_dialog_label,
@@ -58,7 +64,9 @@ internal data class DlnaDialogContent(
     val onLongSelected: ((Int) -> Unit)? = null,
     val onMoreSelected: ((Int) -> Unit)? = null,
     val initialActionFocus: Int? = null,
-    val closeLabel: Int? = null
+    val closeLabel: Int? = null,
+    val onManualAddress: (() -> Unit)? = null,
+    val addressInput: DlnaAddressInput? = null
 )
 
 /** One persistent window whose content changes during navigation and loading. */
@@ -69,6 +77,7 @@ internal class DlnaSelectionDialog(
     private lateinit var list: ListView
     private var awaitingDirectory = content.loading
     private var mediaInformation: DlnaSelectionDialog? = null
+    private var addressWatcher: TextWatcher? = null
     private var playbackCloseToken: Any? = null
     private val loadingHandler = Handler(Looper.getMainLooper())
     private var pendingProgressVisible = false
@@ -147,11 +156,16 @@ internal class DlnaSelectionDialog(
     }
 
     /** Keep the current list and scroll position visible until navigation finishes. */
-    fun keepListWhileLoading(onClose: (() -> Unit)? = null, showLoadingIndicator: Boolean = true): Boolean {
+    fun keepListWhileLoading(onClose: (() -> Unit)? = null, showLoadingIndicator: Boolean = true,
+        onManualAddress: (() -> Unit)? = null): Boolean {
         if (!isShowing || (content.rows.isEmpty() && !content.fileSelection)) return false
         closeMediaInformation()
         clearPendingProgress()
-        if (onClose != null) content = content.copy(onClose = onClose)
+        content = content.copy(onClose = onClose ?: content.onClose, onManualAddress = onManualAddress)
+        findViewById<View>(R.id.dlna_manual_address).apply {
+            // Retain existing footer space while disabling an action from a previous owner.
+            visibility = if (onManualAddress != null) View.VISIBLE else if (visibility == View.VISIBLE) View.INVISIBLE else visibility
+        }
         playbackCloseToken = null
         awaitingDirectory = true
         updateInteractionState()
@@ -176,6 +190,12 @@ internal class DlnaSelectionDialog(
     private fun updateInteractionState() {
         findViewById<View>(R.id.dlna_pending_progress).visibility =
             if (awaitingDirectory && pendingProgressVisible) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.dlna_address).isEnabled = !awaitingDirectory
+        findViewById<View>(R.id.dlna_manual_address).isEnabled = content.onManualAddress != null
+        if (awaitingDirectory && content.onManualAddress != null) {
+            findViewById<View>(R.id.dlna_close).nextFocusUpId = R.id.dlna_manual_address
+            findViewById<View>(R.id.dlna_manual_address).nextFocusDownId = R.id.dlna_close
+        }
         list.isEnabled = !awaitingDirectory
         findViewById<View>(R.id.dlna_details).isEnabled = !awaitingDirectory && content.rows.isNotEmpty()
         for (index in 0 until list.childCount) {
@@ -190,6 +210,7 @@ internal class DlnaSelectionDialog(
     @SuppressLint("ClickableViewAccessibility") // Pointer context action shares the native accessible long-click.
     private fun renderContent() {
         val current = content
+        val browserLayout = current.fileSelection || current.addressInput != null
         fun canInteract() = isShowing && content === current && !awaitingDirectory
         findViewById<TextView>(R.id.dlna_label).apply {
             visibility = if (current.label == null) View.GONE else View.VISIBLE
@@ -205,24 +226,24 @@ internal class DlnaSelectionDialog(
         }
         val up = findViewById<Button>(R.id.dlna_up).apply {
             visibility = if (current.onUp == null) View.GONE else View.VISIBLE
-            text = if (current.fileSelection) "" else activity.getString(current.upLabel)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(if (current.fileSelection) R.drawable.ic_browser_back else 0, 0, 0, 0)
+            text = if (browserLayout) "" else activity.getString(current.upLabel)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(if (browserLayout) R.drawable.ic_browser_back else 0, 0, 0, 0)
             contentDescription = activity.getString(current.upLabel)
             updateLayoutParams<LinearLayout.LayoutParams> {
-                width = if (current.fileSelection) (48 * activity.resources.displayMetrics.density).toInt()
+                width = if (browserLayout) (48 * activity.resources.displayMetrics.density).toInt()
                     else ViewGroup.LayoutParams.MATCH_PARENT
             }
             setOnClickListener { if (canInteract()) current.onUp?.invoke() }
         }
         val refresh = findViewById<Button>(R.id.dlna_refresh).apply {
             visibility = if (current.onRefresh != null) View.VISIBLE else View.GONE
-            text = if (current.fileSelection) "" else activity.getString(current.refreshLabel)
+            text = if (browserLayout) "" else activity.getString(current.refreshLabel)
             contentDescription = activity.getString(current.refreshLabel)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(if (current.fileSelection) R.drawable.ic_browser_refresh else 0, 0, 0, 0)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(if (browserLayout) R.drawable.ic_browser_refresh else 0, 0, 0, 0)
             setOnClickListener { if (canInteract()) current.onRefresh?.invoke() }
         }
         val close = findViewById<Button>(R.id.dlna_close).apply {
-            setText(current.closeLabel ?: if (current.fileSelection) R.string.file_browser_cancel else R.string.dlna_close)
+            setText(current.closeLabel ?: if (browserLayout) R.string.file_browser_cancel else R.string.dlna_close)
             // Loading can replace only onClose without rebuilding this button.
             setOnClickListener { if (isShowing) { dismiss(); content.onClose() } }
         }
@@ -232,13 +253,17 @@ internal class DlnaSelectionDialog(
             setOnClickListener { if (canInteract()) current.onRegister?.invoke() }
         }
         val details = findViewById<Button>(R.id.dlna_details).apply {
-            visibility = if (current.fileSelection && current.rows.isNotEmpty()) View.VISIBLE else View.GONE
+            visibility = if (browserLayout && current.rows.isNotEmpty()) View.VISIBLE else View.GONE
             setOnClickListener {
-                if (content === current && current.fileSelection && current.rows.isNotEmpty()) {
+                if (content === current && browserLayout && current.rows.isNotEmpty()) {
                     val index = list.selectedItemPosition.takeIf { it in current.rows.indices } ?: current.initialSelection.coerceIn(current.rows.indices)
                     showMediaInformation(current, index)
                 }
             }
+        }
+        val manual = findViewById<Button>(R.id.dlna_manual_address).apply {
+            visibility = if (current.onManualAddress == null) View.GONE else View.VISIBLE
+            setOnClickListener { if (isShowing) content.onManualAddress?.invoke() }
         }
         val topRow = findViewById<LinearLayout>(R.id.dlna_top_actions)
         val bottomRow = findViewById<LinearLayout>(R.id.dlna_bottom_actions)
@@ -251,7 +276,7 @@ internal class DlnaSelectionDialog(
                 parent.addView(view, index)
             }
         }
-        if (current.fileSelection) {
+        if (browserLayout) {
             place(close, topRow, 1)
             place(title, topRow, 2)
             place(refresh, topRow, 3)
@@ -260,29 +285,29 @@ internal class DlnaSelectionDialog(
             place(refresh, bottomRow, 1)
             place(close, bottomRow, 2)
         }
-        heading.visibility = if (current.fileSelection) View.GONE else View.VISIBLE
-        title.textSize = if (current.fileSelection) 18f else if (landscape) 22f else 24f
+        heading.visibility = if (browserLayout) View.GONE else View.VISIBLE
+        title.textSize = if (browserLayout) 18f else if (landscape) 22f else 24f
         title.updateLayoutParams<LinearLayout.LayoutParams> {
-            width = if (current.fileSelection) 0 else ViewGroup.LayoutParams.MATCH_PARENT
-            weight = if (current.fileSelection) 1f else 0f
-            marginStart = if (current.fileSelection) (12 * density).toInt() else 0
-            marginEnd = if (current.fileSelection && current.onRefresh != null) (12 * density).toInt() else 0
-            topMargin = if (!current.fileSelection && current.label != null && !landscape) (6 * density).toInt() else 0
+            width = if (browserLayout) 0 else ViewGroup.LayoutParams.MATCH_PARENT
+            weight = if (browserLayout) 1f else 0f
+            marginStart = if (browserLayout) (12 * density).toInt() else 0
+            marginEnd = if (browserLayout && current.onRefresh != null) (12 * density).toInt() else 0
+            topMargin = if (!browserLayout && current.label != null && !landscape) (6 * density).toInt() else 0
         }
         topRow.updateLayoutParams<LinearLayout.LayoutParams> {
-            topMargin = if (current.fileSelection) 0 else ((if (landscape) 8 else 12) * density).toInt()
+            topMargin = if (browserLayout) 0 else ((if (landscape) 8 else 12) * density).toInt()
         }
         listOf(up, refresh, close).forEach { button ->
             val iconButton = button !== close
-            button.setBackgroundResource(if (current.fileSelection) R.drawable.browser_toolbar_button else R.drawable.home_secondary_button)
-            button.setTextColor(if (current.fileSelection) Color.rgb(102, 223, 255) else Color.WHITE)
-            button.minimumWidth = if (current.fileSelection && iconButton) 0 else (88 * density).toInt()
-            val padding = ((if (current.fileSelection && iconButton) 12 else 8) * density).toInt()
+            button.setBackgroundResource(if (browserLayout) R.drawable.browser_toolbar_button else R.drawable.home_secondary_button)
+            button.setTextColor(if (browserLayout) Color.rgb(102, 223, 255) else Color.WHITE)
+            button.minimumWidth = if (browserLayout && iconButton) 0 else (88 * density).toInt()
+            val padding = ((if (browserLayout && iconButton) 12 else 8) * density).toInt()
             button.setPaddingRelative(padding, 0, padding, 0)
             button.updateLayoutParams<LinearLayout.LayoutParams> {
-                width = if (current.fileSelection) ((if (iconButton) 48 else 96) * density).toInt()
+                width = if (browserLayout) ((if (iconButton) 48 else 96) * density).toInt()
                     else if (button === up) ViewGroup.LayoutParams.MATCH_PARENT else 0
-                weight = if (current.fileSelection || button === up) 0f else 1f
+                weight = if (browserLayout || button === up) 0f else 1f
             }
         }
         val topActions = listOf(up, close, refresh).filter { it.parent === topRow && it.visibility == View.VISIBLE }
@@ -296,7 +321,7 @@ internal class DlnaSelectionDialog(
                 button.updateLayoutParams<LinearLayout.LayoutParams> {
                     marginStart = when {
                         index == 0 -> 0
-                        current.fileSelection -> if (button === close && current.onUp != null) spacing else 0
+                        browserLayout -> if (button === close && current.onUp != null) spacing else 0
                         else -> spacing
                     }
                     marginEnd = 0
@@ -311,26 +336,26 @@ internal class DlnaSelectionDialog(
             adapter = RowAdapter(current)
             itemsCanFocus = current.onMoreSelected != null
             val gap = when {
-                !current.fileSelection -> 6
+                !browserLayout -> 6
                 activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE -> 1
                 else -> 2
             }
             dividerHeight = (gap * activity.resources.displayMetrics.density).toInt()
             visibility = if (current.rows.isEmpty()) View.GONE else View.VISIBLE
             nextFocusUpId = (topActions.firstOrNull() ?: bottomActions.first()).id
-            nextFocusDownId = bottomActions.firstOrNull()?.id ?: id
+            nextFocusDownId = if (manual.visibility == View.VISIBLE) manual.id else bottomActions.firstOrNull()?.id ?: id
             setOnItemClickListener { _, _, position, _ ->
                 if (isShowing && content === current && !awaitingDirectory) current.onSelected(position)
             }
             setOnItemLongClickListener { _, _, position, _ ->
                 if (!isShowing || content !== current || awaitingDirectory) false
                 else current.onLongSelected?.let { it(position); true }
-                    ?: if (current.fileSelection) { showMediaInformation(current, position);true } else false
+                    ?: if (browserLayout) { showMediaInformation(current, position);true } else false
             }
-            isLongClickable = current.onLongSelected != null || current.fileSelection
+            isLongClickable = current.onLongSelected != null || browserLayout
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    details.contentDescription = if (current.fileSelection) activity.getString(R.string.media_name_format) + "。" +
+                    details.contentDescription = if (browserLayout) activity.getString(R.string.media_name_format) + "。" +
                         (current.rows.getOrNull(position)?.media?.displayName ?: current.rows.getOrNull(position)?.title.orEmpty()) else null
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -344,7 +369,7 @@ internal class DlnaSelectionDialog(
                         val position = pointToPosition(event.x.toInt(), event.y.toInt())
                         if (position != ListView.INVALID_POSITION) {
                             if (current.onLongSelected != null) current.onLongSelected.invoke(position)
-                            else if (current.fileSelection) showMediaInformation(current, position)
+                            else if (browserLayout) showMediaInformation(current, position)
                         }
                     }
                 }
@@ -362,27 +387,61 @@ internal class DlnaSelectionDialog(
         }
         findViewById<View>(R.id.dlna_message_container).visibility = if (current.rows.isEmpty()) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.dlna_message).text = current.message
+        findViewById<View>(R.id.dlna_address_label).visibility = if (current.addressInput == null) View.GONE else View.VISIBLE
+        findViewById<EditText>(R.id.dlna_address).apply {
+            if (visibility == View.VISIBLE && (current.addressInput == null || current.loading))
+                activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                    ?.hideSoftInputFromWindow(windowToken, 0)
+            addressWatcher?.let { removeTextChangedListener(it) }
+            visibility = if (current.addressInput == null) View.GONE else View.VISIBLE
+            setText(current.addressInput?.value.orEmpty())
+            setSelection(text.length)
+            error = current.addressInput?.error
+            nextFocusDownId = R.id.dlna_register
+            addressWatcher = object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (isShowing && content === current) current.addressInput?.onChanged?.invoke(s.toString())
+                }
+                override fun afterTextChanged(s: Editable?) = Unit
+            }.also { addTextChangedListener(it) }
+            setOnEditorActionListener { _, action, _ ->
+                if (action == EditorInfo.IME_ACTION_DONE && canInteract() && current.addressInput != null) {
+                    current.onRegister?.invoke();true
+                } else false
+            }
+            setOnKeyListener { _, code, event ->
+                if (code == KeyEvent.KEYCODE_ENTER && event.hasNoModifiers() && current.addressInput != null) {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && canInteract()) current.onRegister?.invoke()
+                    true
+                } else false
+            }
+        }
         findViewById<View>(R.id.dlna_progress).visibility = if (current.loading) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.dlna_hint).apply {
             val configuration = activity.resources.configuration
-            val needsListSpace = current.fileSelection && configuration.fontScale >= 1.5f && configuration.screenHeightDp < 700
+            val needsListSpace = browserLayout && configuration.fontScale >= 1.5f && configuration.screenHeightDp < 700
             visibility = if (current.rows.isEmpty() || configuration.orientation ==
                 Configuration.ORIENTATION_LANDSCAPE || needsListSpace) View.GONE else View.VISIBLE
-            setText(if (current.fileSelection) {
+            setText(if (browserLayout) {
                 if (isTv()) R.string.file_browser_tv_hint else R.string.file_browser_hint
             } else current.hint ?: if (current.onUp == null) R.string.dlna_server_hint else if (isTv()) R.string.dlna_tv_hint else R.string.dlna_touch_hint)
-            setBackgroundColor(if (current.fileSelection) Color.rgb(14, 22, 40) else Color.TRANSPARENT)
-            val padding = if (current.fileSelection) (12 * density).toInt() else 0
+            setBackgroundColor(if (browserLayout) Color.rgb(14, 22, 40) else Color.TRANSPARENT)
+            val padding = if (browserLayout) (12 * density).toInt() else 0
             setPadding(padding, padding, padding, padding)
         }
         topActions.forEach { button ->
             button.nextFocusUpId = button.id
-            button.nextFocusDownId = if (current.rows.isNotEmpty()) list.id else bottomActions.firstOrNull()?.id ?: button.id
+            button.nextFocusDownId = if (current.rows.isNotEmpty()) list.id else current.initialActionFocus
+                ?: if (manual.visibility == View.VISIBLE) manual.id else bottomActions.firstOrNull()?.id ?: button.id
         }
         bottomActions.forEach { button ->
-            button.nextFocusUpId = if (current.rows.isNotEmpty()) list.id else topActions.firstOrNull()?.id ?: button.id
+            button.nextFocusUpId = if (manual.visibility == View.VISIBLE) manual.id else if (current.addressInput != null) R.id.dlna_address
+                else if (current.rows.isNotEmpty()) list.id else topActions.firstOrNull()?.id ?: button.id
             button.nextFocusDownId = button.id
         }
+        manual.nextFocusUpId = if (current.rows.isNotEmpty()) list.id else topActions.firstOrNull()?.id ?: R.id.dlna_close
+        manual.nextFocusDownId = bottomActions.firstOrNull()?.id ?: R.id.dlna_close
         updateInteractionState()
     }
 
@@ -491,11 +550,15 @@ internal class DlnaSelectionDialog(
     }
 
     fun refreshForConfiguration() {
+        val selection = findViewById<EditText>(R.id.dlna_address).selectionStart
+        val address = content.addressInput?.copy(value = findViewById<EditText>(R.id.dlna_address).text.toString())
+        content = content.copy(addressInput = address)
         val position = list.selectedItemPosition.takeIf { it >= 0 } ?: list.firstVisiblePosition
         content = content.copy(initialSelection = position.coerceAtLeast(0))
         setContentView(R.layout.dialog_dlna_browser)
         renderContent()
         updateWindowSize()
+        if (address != null) findViewById<EditText>(R.id.dlna_address).setSelection(selection.coerceIn(0, address.value.length))
         if (mediaInformation?.isShowing == true) mediaInformation?.refreshForConfiguration()
         else focusSelection()
     }

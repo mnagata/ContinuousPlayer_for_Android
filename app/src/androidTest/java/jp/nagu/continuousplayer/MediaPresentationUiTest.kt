@@ -87,6 +87,8 @@ class MediaPresentationUiTest {
                 val view = list.adapter.getView(index, null, list)
                 assertEquals("M4V", view.findViewById<TextView>(R.id.dlna_row_format).text.toString())
                 assertTrue(view.tooltipText.toString().contains(chosen.media!!.displayName))
+                // A programmatic selection must leave touch mode, just as keyboard navigation does.
+                list.requestFocusFromTouch()
                 list.setSelectionFromTop(index, 0)
             }
             BrowserTestUi.waitUntil { (browser().findViewById<ListView>(R.id.dlna_list).selectedItem as? DlnaRow)?.formatBadge == "M4V" }
