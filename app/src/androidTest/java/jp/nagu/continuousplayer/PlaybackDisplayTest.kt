@@ -33,7 +33,7 @@ class PlaybackDisplayTest {
         scenario.onActivity { activity ->
             assertTrue(fixture.player.isPlaying)
             assertTrue(fixture.overlay.isShown)
-            assertEquals(fixture.videos[0].displayName, activity.findViewById<TextView>(R.id.overlay_filename).text.toString())
+            assertEquals(fixture.videos[0].selectionTitle, activity.findViewById<TextView>(R.id.overlay_filename).text.toString())
             controls.forEach { assertTrue(activity.findViewById<View>(it).isShown) }
             assertEquals(activity.getString(R.string.pause_playback), activity.findViewById<View>(R.id.btn_overlay_play_pause).contentDescription)
             assertFalse(activity.findViewById<View>(R.id.playback_status).isShown)
@@ -76,7 +76,7 @@ class PlaybackDisplayTest {
         BrowserTestUi.waitUntil { fixture.player.isPlaying && fixture.player.currentTracks.containsType(C.TRACK_TYPE_AUDIO) }
         scenario.onActivity {
             assertTrue(fixture.overlay.isShown)
-            assertEquals(fixture.videos[2].displayName, it.findViewById<TextView>(R.id.overlay_filename).text.toString())
+            assertEquals(fixture.videos[2].selectionTitle, it.findViewById<TextView>(R.id.overlay_filename).text.toString())
         }
     }
 
@@ -130,7 +130,7 @@ class PlaybackDisplayTest {
         BrowserTestUi.waitUntil { fixture.player.currentMediaItemIndex == 1 && fixture.player.isPlaying && fixture.overlay.isShown }
         scenario.onActivity {
             assertFalse(it.findViewById<View>(R.id.playback_status).isShown)
-            assertEquals(fixture.videos[1].displayName, it.findViewById<TextView>(R.id.overlay_filename).text.toString())
+            assertEquals(fixture.videos[1].selectionTitle, it.findViewById<TextView>(R.id.overlay_filename).text.toString())
         }
     }
 
@@ -149,7 +149,7 @@ class PlaybackDisplayTest {
             assertNotNull(fixture.player.playerError)
             assertTrue(fixture.overlay.isShown)
             assertEquals(activity.getString(R.string.playback_failed), activity.findViewById<TextView>(R.id.playback_status).text.toString())
-            assertEquals(fixture.videos[0].displayName, activity.findViewById<TextView>(R.id.overlay_filename).text.toString())
+            assertEquals(fixture.videos[0].selectionTitle, activity.findViewById<TextView>(R.id.overlay_filename).text.toString())
             controls.forEach { assertTrue(activity.findViewById<View>(it).isShown) }
         }
         screenshot("local-error")

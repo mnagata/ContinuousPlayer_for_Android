@@ -48,7 +48,7 @@ class PlaybackControlsTest {
         scenario.onActivity {
             assertFalse(fixture.player.playWhenReady)
             assertEquals(0L, fixture.player.currentPosition)
-            assertEquals(fixture.videos[2].displayName, it.findViewById<TextView>(R.id.overlay_filename).text.toString())
+            assertEquals(fixture.videos[2].selectionTitle, it.findViewById<TextView>(R.id.overlay_filename).text.toString())
         }
         BrowserTestUi.tap(R.string.previous_file)
         BrowserTestUi.waitUntil { fixture.player.currentMediaItemIndex == 1 && fixture.player.playbackState == Player.STATE_READY }
@@ -113,7 +113,7 @@ class PlaybackControlsTest {
                 saveScreenshot(fixture, "tv")
                 keyStroke(KeyEvent.KEYCODE_DPAD_LEFT)
                 scenario.onActivity {
-                    assertTrue(it.findViewById<View>(R.id.btn_overlay_rewind).hasFocus())
+                    assertTrue("Focus after Left: ${it.currentFocus}; touch=${it.currentFocus?.isInTouchMode}; window=${it.window.decorView.hasWindowFocus()}; target=${it.currentFocus?.focusSearch(View.FOCUS_LEFT)}", it.findViewById<View>(R.id.btn_overlay_rewind).hasFocus())
                     assertEquals(30_000L, fixture.player.currentPosition)
                 }
                 keyStroke(KeyEvent.KEYCODE_DPAD_CENTER)
@@ -156,6 +156,37 @@ class PlaybackControlsTest {
     @Test fun visibleControlsFitWithoutOverlapAndExposeFilename() = withPlayback { scenario, fixture ->
         scenario.onActivity { assertControlBounds(it) }
         saveScreenshot(fixture, "portrait")
+    }
+
+    @Test fun systemBarInsetsStayInsideMenusInsteadOfAddingOuterGaps() = withPlayback { scenario, fixture ->
+        val root = fixture.playerView.rootView
+        val overlay = root.findViewById<View>(R.id.pause_overlay)
+        val original = ViewCompat.getRootWindowInsets(overlay)!!
+        try {
+            for (shown in listOf(true, false)) {
+                val barSize = if (shown) (24 * root.resources.displayMetrics.density).toInt() else 0
+                scenario.onActivity {
+                    val insets = WindowInsetsCompat.Builder(original)
+                        .setInsets(WindowInsetsCompat.Type.systemBars(), androidx.core.graphics.Insets.of(0, barSize, 0, barSize))
+                        .setVisible(WindowInsetsCompat.Type.systemBars(), shown)
+                        .build()
+                    ViewCompat.dispatchApplyWindowInsets(overlay, insets)
+                }
+                BrowserTestUi.waitUntil {
+                    !overlay.findViewById<View>(R.id.player_header).isLayoutRequested &&
+                        !overlay.findViewById<View>(R.id.player_transport_controls).isLayoutRequested
+                }
+                scenario.onActivity {
+                    assertControlBounds(it)
+                    assertEquals(0, overlay.paddingTop)
+                    assertEquals(0, overlay.paddingBottom)
+                    val cutout = original.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.displayCutout())
+                    assertEquals(maxOf(barSize, cutout.top), it.findViewById<View>(R.id.player_header).paddingTop)
+                }
+            }
+        } finally {
+            scenario.onActivity { ViewCompat.dispatchApplyWindowInsets(overlay, original) }
+        }
     }
 
     @Test fun rotationAndOverlayVisibilityKeepPlayerGeometryStable() = withPlayback(video = true) { scenario, fixture ->
@@ -223,7 +254,7 @@ class PlaybackControlsTest {
     }
 
     @Test fun informationUsesCommonTitleWithoutPlayingStatus() = withPlayback { scenario, fixture ->
-        scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_info).performClick() }
+        scenario.onActivity { assertTrue("Information button has no click action", it.findViewById<View>(R.id.btn_overlay_info).performClick()) }
         BrowserTestUi.waitUntil { android.view.inspector.WindowInspector.getGlobalWindowViews().any { it.findViewById<View>(R.id.info_close) != null } }
         scenario.onActivity {
             val window = android.view.inspector.WindowInspector.getGlobalWindowViews().single { it.findViewById<View>(R.id.info_close) != null }
@@ -247,8 +278,9 @@ class PlaybackControlsTest {
         val overlay = bounds(activity.findViewById(R.id.pause_overlay))
         val player = bounds(activity.findViewById(R.id.player_view))
         assertTrue(player.contains(overlay))
-        val safe = ViewCompat.getRootWindowInsets(activity.findViewById(R.id.pause_overlay))!!
-            .getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val insets = ViewCompat.getRootWindowInsets(activity.findViewById(R.id.pause_overlay))!!
+        val safe = androidx.core.graphics.Insets.max(insets.getInsets(WindowInsetsCompat.Type.systemBars()),
+            insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.displayCutout()))
         val screen = bounds(activity.findViewById(R.id.player_container))
         assertTrue(bounds(activity.findViewById(navigation.first())).top >= screen.top + safe.top)
         assertTrue(bounds(activity.findViewById(navigation.first())).left >= screen.left + safe.left)
@@ -265,8 +297,17 @@ class PlaybackControlsTest {
             assertTrue(bounds(activity.findViewById(first)).right <= bounds(activity.findViewById(second)).left)
         }
         val filename = activity.findViewById<TextView>(R.id.overlay_filename)
-        assertTrue(bounds(activity.findViewById(R.id.player_navigation_controls)).bottom <= bounds(filename).top)
-        assertTrue(bounds(filename).bottom <= bounds(activity.findViewById(R.id.player_transport_controls)).top)
+        val header = bounds(activity.findViewById(R.id.player_header))
+        val navigationBounds = bounds(activity.findViewById(R.id.player_navigation_controls))
+        val transportBounds = bounds(activity.findViewById(R.id.player_transport_controls))
+        assertTrue(bounds(filename).right <= navigationBounds.left)
+        assertTrue(header.contains(bounds(filename)) && header.contains(navigationBounds))
+        assertEquals(1, filename.maxLines)
+        assertEquals("Header must touch the top edge", screen.top, header.top)
+        assertEquals(overlay.right - activity.findViewById<View>(R.id.pause_overlay).paddingRight, navigationBounds.right)
+        assertTrue(header.bottom < transportBounds.top)
+        assertEquals("Transport must touch the bottom edge", screen.bottom, transportBounds.bottom)
+        assertTrue(kotlin.math.abs(transportBounds.centerX() - header.centerX()) <= 1)
         assertEquals(filename.text, filename.createAccessibilityNodeInfo().text)
     }
 
@@ -342,9 +383,12 @@ class PlaybackControlsTest {
                 scenario.onActivity { player.seekTo(if (count > 1) 1 else 0, 30_000); player.pause() }
                 BrowserTestUi.waitUntil {
                     val overlay = playerView.rootView.findViewById<View>(R.id.pause_overlay)
-                    val safeTop = ViewCompat.getRootWindowInsets(overlay)?.getInsetsIgnoringVisibility(
-                        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())?.top
-                    player.playbackState == Player.STATE_READY && overlay.isShown && safeTop == overlay.paddingTop &&
+                    val insets = ViewCompat.getRootWindowInsets(overlay)
+                    val safeTop = insets?.let { androidx.core.graphics.Insets.max(
+                        it.getInsets(WindowInsetsCompat.Type.systemBars()),
+                        it.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.displayCutout())).top }
+                    player.playbackState == Player.STATE_READY && overlay.isShown && overlay.paddingTop == 0 &&
+                        safeTop == playerView.rootView.findViewById<View>(R.id.player_header).paddingTop &&
                         playerView.rootView.findViewById<View>(R.id.btn_overlay_rewind).isEnabled
                 }
                 action(scenario, Fixture(playerView, player, videos))

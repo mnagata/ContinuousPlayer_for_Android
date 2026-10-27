@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var folderSelectContainer: LinearLayout
     private lateinit var playerContainer: FrameLayout
     private lateinit var playerView: PlayerView
-    private lateinit var pauseOverlay: LinearLayout
+    private lateinit var pauseOverlay: FrameLayout
     private lateinit var overlayFilename: TextView
     private lateinit var portraitVideoInfo: TextView
     private lateinit var selectFolderButton: Button
@@ -186,13 +186,18 @@ class MainActivity : AppCompatActivity() {
         pauseOverlay = findViewById(R.id.pause_overlay)
         val controlPaddingLeft = pauseOverlay.paddingLeft
         val controlPaddingRight = pauseOverlay.paddingRight
-        val controlPaddingBottom = pauseOverlay.paddingBottom
+        val header = findViewById<View>(R.id.player_header)
+        val transport = findViewById<View>(R.id.player_transport_controls)
+        val transportPaddingBottom = transport.paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(pauseOverlay) { view, insets ->
-            // Keep controls clear of notches and transient system bars without moving the video.
-            val safe = insets.getInsetsIgnoringVisibility(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(controlPaddingLeft + safe.left, safe.top,
-                controlPaddingRight + safe.right, controlPaddingBottom)
+            // Bars touch the screen edges; only their contents avoid visible system UI and cutouts.
+            val safe = androidx.core.graphics.Insets.max(
+                insets.getInsets(WindowInsetsCompat.Type.systemBars()),
+                insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.displayCutout()))
+            view.setPadding(controlPaddingLeft + safe.left, 0, controlPaddingRight + safe.right, 0)
+            header.setPadding(header.paddingLeft, safe.top, header.paddingRight, header.paddingBottom)
+            transport.setPadding(transport.paddingLeft, transport.paddingTop,
+                transport.paddingRight, transportPaddingBottom + safe.bottom)
             insets
         }
         overlayFilename = findViewById(R.id.overlay_filename)
@@ -967,12 +972,13 @@ class MainActivity : AppCompatActivity() {
         if (show) {
             val index = playerController?.player?.currentMediaItemIndex ?: 0
             val video = viewModel.videos.getOrNull(index)
-            overlayFilename.text = video?.displayName ?: ""
+            overlayFilename.text = video?.selectionTitle.orEmpty()
             if ((userPaused || ended || failed) && isTelevision && currentFocus?.let { isDescendantOf(it, pauseOverlay) } != true) {
                 overlayPlayPauseButton.requestFocus()
             }
                }
         if (!show && wasVisible && (isTelevision || !playerView.isInTouchMode)) playerView.requestFocus()
+        updatePortraitVideoInfo()
           }
 
     private fun updateTransportButtons() {
@@ -996,7 +1002,7 @@ private fun updatePortraitVideoInfo() {
         try {
             val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
             Log.d(TAG, "updatePortraitVideoInfo: isPortrait=$isPortrait, isPlayerScreen=${viewModel.isPlayerScreen}, player=${playerController?.player != null}, videos=${viewModel.videos.size}")
-            if (!isPortrait || !viewModel.isPlayerScreen) {
+            if (!isPortrait || !viewModel.isPlayerScreen || pauseOverlay.isShown) {
                 portraitVideoInfo.visibility = View.GONE
                 return
                    }

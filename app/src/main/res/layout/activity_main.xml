@@ -106,21 +106,50 @@
             android:layout_height="match_parent"
             android:importantForAccessibility="no" />
 
-         <!-- Navigation, filename and transport stay in separate rows at every screen width. -->
-         <LinearLayout
+         <!-- Transparent overlay: one title/navigation row at the top, transport at the bottom. -->
+         <FrameLayout
             android:id="@+id/pause_overlay"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top"
-            android:background="#D9101723"
-            android:orientation="vertical"
+            android:layout_height="match_parent"
             android:paddingHorizontal="8dp"
-            android:paddingBottom="4dp"
             android:visibility="gone">
 
              <LinearLayout
-                android:id="@+id/player_navigation_controls"
+                android:id="@+id/player_header"
                 android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:layout_gravity="top"
+                android:background="#D9101723"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                 <TextView
+                    android:id="@+id/overlay_filename"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingHorizontal="8dp"
+                    android:gravity="start|center_vertical"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp" />
+                 <TextView
+                    android:id="@+id/playback_status"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingHorizontal="4dp"
+                    android:gravity="end|center_vertical"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp"
+                    android:accessibilityLiveRegion="polite"
+                    android:visibility="gone" />
+             <LinearLayout
+                android:id="@+id/player_navigation_controls"
+                android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
@@ -158,34 +187,16 @@
                     android:nextFocusDown="@id/btn_overlay_play_pause"
                     android:nextFocusForward="@id/btn_overlay_previous" />
              </LinearLayout>
-
-             <TextView
-                android:id="@+id/overlay_filename"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="28dp"
-                android:paddingHorizontal="8dp"
-                android:gravity="center"
-                android:ellipsize="middle"
-                android:maxLines="1"
-                android:textColor="@android:color/white"
-                android:textSize="14sp" />
-
-             <TextView
-                android:id="@+id/playback_status"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingHorizontal="8dp"
-                android:gravity="center"
-                android:textColor="@android:color/white"
-                android:textSize="14sp"
-                android:accessibilityLiveRegion="polite"
-                android:visibility="gone" />
+             </LinearLayout>
 
              <LinearLayout
                 android:id="@+id/player_transport_controls"
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="wrap_content"
+                android:minHeight="56dp"
+                android:paddingVertical="4dp"
+                android:layout_gravity="bottom"
+                android:background="#D9101723"
                 android:orientation="horizontal"
                 android:gravity="center">
                  <ImageButton
@@ -244,7 +255,7 @@
                     android:nextFocusDown="@id/btn_overlay_info"
                     android:nextFocusForward="@id/btn_overlay_home" />
              </LinearLayout>
-         </LinearLayout>
+         </FrameLayout>
 
          <!-- Portrait video info (centered in bottom dark area) -->
          <TextView

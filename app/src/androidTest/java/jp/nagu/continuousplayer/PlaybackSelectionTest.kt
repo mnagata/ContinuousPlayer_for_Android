@@ -391,7 +391,7 @@ class PlaybackSelectionTest {
                 assertEquals(1, original.currentMediaItemIndex)
                 assertEquals(stoppedPosition.toDouble(), original.currentPosition.toDouble(), 250.0)
                 assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility)
-                assertEquals("D01 ED.wav", it.findViewById<TextView>(R.id.overlay_filename).text.toString())
+                assertEquals("D01 ED", it.findViewById<TextView>(R.id.overlay_filename).text.toString())
                 val model = ViewModelProvider(it)[PlayerViewModel::class.java]
                 assertSame(fixture.playlist, model.videos)
                 assertEquals(fixture.folder, model.playbackFolder)
@@ -699,7 +699,7 @@ class PlaybackSelectionTest {
             assertEquals(1, original.currentMediaItemIndex)
             assertEquals(30_000.0, original.currentPosition.toDouble(), 1_500.0)
             assertEquals(View.VISIBLE, it.findViewById<View>(R.id.pause_overlay).visibility)
-            assertEquals("D01 ED.wav", it.findViewById<TextView>(R.id.overlay_filename).text.toString())
+            assertEquals("D01 ED", it.findViewById<TextView>(R.id.overlay_filename).text.toString())
             assertSame(fixture.playlist, ViewModelProvider(it)[PlayerViewModel::class.java].videos)
         }
     }
