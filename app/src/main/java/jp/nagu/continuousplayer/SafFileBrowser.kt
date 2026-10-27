@@ -4,7 +4,6 @@ import android.net.Uri
 import android.content.Intent
 import android.provider.DocumentsContract
 import android.util.Log
-import android.widget.PopupMenu
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
@@ -32,7 +31,6 @@ class SafFileBrowser(
     private val lastPlaybackFolder = LastPlaybackFolder(activity)
     private var dialog: DlnaSelectionDialog? = null
     private var folderMenu: DlnaSelectionDialog? = null
-    private var folderActions: PopupMenu? = null
     private var job: Job? = null
     internal var selectedFolder: PlaybackFolder.Saf? = null
         private set
@@ -40,8 +38,6 @@ class SafFileBrowser(
     internal fun openFolder(folder: PlaybackFolder.Saf, focusUri: Uri? = null) = browse(folder.path, focusUri)
 
     fun close() {
-        folderActions?.dismiss()
-        folderActions = null
         folderMenu?.dismiss()
         folderMenu = null
         job?.cancel()
@@ -57,8 +53,6 @@ class SafFileBrowser(
 
     /** Transfer the attached window without revealing the activity underneath. */
     internal fun takeDialog(): DlnaSelectionDialog? {
-        folderActions?.dismiss()
-        folderActions = null
         folderMenu?.dismiss()
         folderMenu = null
         job?.cancel()
@@ -67,8 +61,6 @@ class SafFileBrowser(
     }
 
     fun onConfigurationChanged() {
-        folderActions?.dismiss()
-        folderActions = null
         dialog?.takeIf { it.isShowing }?.refreshForConfiguration()
         folderMenu?.takeIf { it.isShowing }?.refreshForConfiguration()
     }
@@ -125,8 +117,8 @@ class SafFileBrowser(
             label = R.string.saved_folder_dialog_label,
             hint = R.string.add_folder_source_hint,
             rows = sources.map { it.first },
-            upLabel = R.string.saved_folder_list,
             onUp = { showRoots() },
+            showUpButton = false,
             onClose = { showRoots() },
             onSelected = { index ->
                 // Keep this window underneath the SAF/USB picker so cancelling returns here.
@@ -192,28 +184,9 @@ class SafFileBrowser(
                         close()
                     }
                 },
-                onMoreSelected = { index -> showFolderActions(index, titles[index]) { removeAt(index) } },
+                savedFolderRows = true,
                 onLongSelected = { index -> confirmUnregister(index, titles[index]) { removeAt(index) } }))
         }
-    }
-
-    private fun showFolderActions(index: Int, title: String, remove: () -> Unit) {
-        val owner = dialog ?: return
-        val list = owner.findViewById<android.widget.ListView>(R.id.dlna_list) ?: return
-        val row = list.getChildAt(index - list.firstVisiblePosition) ?: return
-        val anchor = row.findViewById<android.view.View>(R.id.saved_folder_more) ?: return
-        folderActions?.dismiss()
-        val actions = PopupMenu(activity, anchor)
-        folderActions = actions
-        actions.menu.add(R.string.folder_unregister).setOnMenuItemClickListener {
-            if (folderActions === actions && dialog === owner && owner.isShowing) confirmUnregister(index, title, remove)
-            true
-        }
-        actions.setOnDismissListener {
-            if (folderActions === actions) folderActions = null
-            if (dialog === owner && owner.isShowing && folderMenu == null) owner.focusRow(index)
-        }
-        actions.show()
     }
 
     private fun confirmUnregister(index: Int, title: String, remove: () -> Unit) {

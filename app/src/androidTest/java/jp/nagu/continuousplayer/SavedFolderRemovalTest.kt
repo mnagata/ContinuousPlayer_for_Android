@@ -34,8 +34,8 @@ import java.nio.ByteOrder
 
 @RunWith(AndroidJUnit4::class)
 class SavedFolderRemovalTest {
-    @Test fun phoneMoreCanRemoveSafAndFocusNextRow() = remove("Season 00", "Season 01")
-    @Test fun tvMoreCanRemoveSafAndFocusNextRow() = remove("Season 00", "Season 01", tv = true)
+    @Test fun phoneLongPressCanRemoveSafAndFocusNextRow() = remove("Season 00", "Season 01")
+    @Test fun tvLongPressCanRemoveSafAndFocusNextRow() = remove("Season 00", "Season 01", tv = true)
     @Test fun phoneOfflineDlnaRemovalFocusesNextRowWithoutConnecting() = remove("D19 NAS A", "D19 NAS B")
     @Test fun tvOfflineDlnaRemovalFocusesNextRowWithoutConnecting() = remove("D19 NAS A", "D19 NAS B", tv = true)
     @Test fun phoneLastUsbRemovalFocusesPreviousRow() = remove("D19 USB Z offline", "D19 USB A")
@@ -47,68 +47,51 @@ class SavedFolderRemovalTest {
     @Test fun singleUsbRemovalFocusesAddAndKeepsFile() = remove("D19 USB A", null, only = "usb")
     @Test fun offlineSafRegistrationCanBeRemovedWithoutReadingTheFolder() = remove(
         InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.saf_unavailable_folder), null, only = "offline-saf")
-    @Test fun touchMoreOpensMenuWithoutOpeningFolder() = withFixture { f ->
-        open(f);visibleRow(f, "D19 NAS A")
-        BrowserTestUi.tap("D19 NAS Aのその他")
-        BrowserTestUi.waitForText(R.string.folder_unregister);assertEquals(0, f.client.requests)
-        BrowserTestUi.tap(R.string.folder_unregister);awaitConfirmation(f)
-    }
-    @Test fun tvMoreAllowsVerticalRowNavigation() = withFixture(tv = true) { f ->
+    @Test fun tvRowsAllowVerticalNavigationWithoutOtherActions() = withFixture(tv = true) { f ->
         open(f);val row = visibleRow(f, "D19 NAS A")
         f.scenario.onActivity { row.findViewById<View>(R.id.saved_folder_open).requestFocus() }
-        key(KeyEvent.KEYCODE_DPAD_RIGHT)
-        BrowserTestUi.waitUntil { row.findViewById<View>(R.id.saved_folder_more).hasFocus() }
         key(KeyEvent.KEYCODE_DPAD_DOWN)
         BrowserTestUi.waitUntil { (saved()!!.findViewById<ListView>(R.id.dlna_list).selectedItem as? DlnaRow)?.title == "D19 NAS B" }
         key(KeyEvent.KEYCODE_DPAD_UP)
-        BrowserTestUi.waitUntil { (saved()!!.findViewById<ListView>(R.id.dlna_list).selectedItem as? DlnaRow)?.title == "D19 NAS A" }
+        awaitFocus(f, "D19 NAS A", 6)
         assertEquals(0, f.client.requests)
     }
     @Test fun safConfirmationCanBeCancelledWithoutReleasingPermission() = cancel("Season 00")
     @Test fun dlnaConfirmationCanBeCancelledWithoutConnecting() = cancel("D19 NAS A")
     @Test fun usbConfirmationCanBeCancelledWithoutRemovingBookmark() = cancel("D19 USB A")
-    @Test fun tvRightAndDecisionOpenMoreWithoutOpeningFolder() = withFixture(tv = true) { f ->
+    @Test fun tvDecisionLongPressOpensConfirmationWithoutOpeningFolder() = withFixture(tv = true) { f ->
         open(f);val row = visibleRow(f, "D19 NAS A")
         f.scenario.onActivity { row.findViewById<View>(R.id.saved_folder_open).requestFocus() }
-        key(KeyEvent.KEYCODE_DPAD_RIGHT)
-        BrowserTestUi.waitUntil { row.findViewById<View>(R.id.saved_folder_more).hasFocus() }
-        key(KeyEvent.KEYCODE_DPAD_CENTER);BrowserTestUi.waitForText(R.string.folder_unregister)
-        key(KeyEvent.KEYCODE_DPAD_DOWN);key(KeyEvent.KEYCODE_DPAD_CENTER);awaitConfirmation(f)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val down = SystemClock.uptimeMillis()
+        assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, down,
+            KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER, 0, 0, -1, 0, 0, InputDevice.SOURCE_DPAD), true))
+        SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200)
+        assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, SystemClock.uptimeMillis(),
+            KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER, 0, 0, -1, 0, 0, InputDevice.SOURCE_DPAD), true))
+        awaitConfirmation(f)
         f.scenario.onActivity { assertEquals(R.id.dlna_close, confirmation()!!.findFocus()!!.id) }
         key(KeyEvent.KEYCODE_DPAD_CENTER);awaitFocus(f, "D19 NAS A", 6)
         assertEquals(0, f.client.requests)
     }
-    @Test fun tabAndShiftTabReachMoreAndReturnToOpen() = withFixture { f ->
-        open(f);val row = visibleRow(f, "D19 NAS A")
-        f.scenario.onActivity { row.findViewById<View>(R.id.saved_folder_open).requestFocus() }
-        key(KeyEvent.KEYCODE_TAB)
-        BrowserTestUi.waitUntil { row.findViewById<View>(R.id.saved_folder_more).hasFocus() }
-        key(KeyEvent.KEYCODE_TAB, KeyEvent.META_SHIFT_ON)
-        BrowserTestUi.waitUntil { row.findViewById<View>(R.id.saved_folder_open).hasFocus() }
-        assertEquals(0, f.client.requests)
-    }
-    @Test fun moreAndOpenExposeSeparateAccessibleActions() = withFixture { f ->
+    @Test fun savedRowExposesOpenAndAccessibleLongClickWithoutMoreButton() = withFixture { f ->
         open(f);val row = visibleRow(f, "D19 NAS A")
         f.scenario.onActivity {
             val main = row.findViewById<View>(R.id.saved_folder_open)
-            val more = row.findViewById<View>(R.id.saved_folder_more)
-            assertEquals("android.widget.Button", main.createAccessibilityNodeInfo().className.toString())
+            val node = main.createAccessibilityNodeInfo()
+            assertEquals("android.widget.Button", node.className.toString())
             assertTrue(main.contentDescription.toString().startsWith("D19 NAS A。"))
-            assertTrue(more.contentDescription.toString().startsWith("D19 NAS Aのその他。"))
-            for (view in listOf(main, more)) {
-                assertTrue(view.isClickable && view.isFocusable && view.isImportantForAccessibility)
-                val bounds = Rect();assertTrue(view.getGlobalVisibleRect(bounds));assertTrue(bounds.width() >= 48 * view.resources.displayMetrics.density)
-            }
+            assertTrue(main.isClickable && main.isLongClickable && main.isFocusable && main.isImportantForAccessibility)
+            assertTrue(node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_LONG_CLICK && it.label == "登録解除" })
+            assertEquals(1, (row as android.view.ViewGroup).childCount)
+            val bounds = Rect();assertTrue(main.getGlobalVisibleRect(bounds))
+            assertEquals(row.width, main.width)
         }
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val node = automation.rootInActiveWindow.findAccessibilityNodeInfosByText("D19 NAS Aのその他").first { it.isClickable }
-        assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-        BrowserTestUi.waitForText(R.string.folder_unregister)
+        val node = automation.rootInActiveWindow.findAccessibilityNodeInfosByText("D19 NAS A").first { it.isLongClickable }
+        assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK))
+        awaitConfirmation(f)
         assertEquals(0, f.client.requests)
-    }
-    @Test fun popupBackDoesNotChangeRegistrationAndRestoresRow() = withFixture { f ->
-        open(f);showMore(f, "D19 NAS A");key(KeyEvent.KEYCODE_BACK)
-        awaitFocus(f, "D19 NAS A", 6);assertEquals(2, SavedDlnaFolders(f.context).all().size)
     }
     @Test fun longPressStillOpensConfirmationWithoutOpeningFolder() = withFixture { f ->
         open(f);visibleRow(f, "D19 NAS A");BrowserTestUi.tap("D19 NAS A", longPress = true)
@@ -121,20 +104,20 @@ class SavedFolderRemovalTest {
         f.scenario.onActivity { assertEquals(2, browserWindows().size) };assertEquals(0, f.client.requests)
     }
     @Test fun closedConfirmationCannotRemoveItsOldTarget() = withFixture { f ->
-        open(f);confirmFromMore(f, "D19 NAS A")
+        open(f);confirmFromLongPress(f, "D19 NAS A")
         lateinit var old: View
         f.scenario.onActivity { old = confirmation()!!.findViewById(R.id.dlna_register);confirmation()!!.findViewById<View>(R.id.dlna_close).performClick() }
         awaitFocus(f, "D19 NAS A", 6)
         f.scenario.onActivity { old.performClick() }
         assertEquals(2, SavedDlnaFolders(f.context).all().size)
     }
-    @Test fun loadingSavedFolderDisablesMoreAndRejectsDelayedClick() = withFixture { f ->
+    @Test fun loadingSavedFolderDisablesLongPressAndRejectsDelayedAction() = withFixture { f ->
         f.client.delayed = true
         open(f);val row = visibleRow(f, "D19 NAS A")
-        val more = row.findViewById<View>(R.id.saved_folder_more)
-        f.scenario.onActivity { row.findViewById<View>(R.id.saved_folder_open).performClick() }
-        BrowserTestUi.waitUntil { f.client.requests == 1 && !more.isEnabled }
-        f.scenario.onActivity { more.performClick();assertNull(confirmation()) }
+        val main = row.findViewById<View>(R.id.saved_folder_open)
+        f.scenario.onActivity { main.performClick() }
+        BrowserTestUi.waitUntil { f.client.requests == 1 && !main.isEnabled }
+        f.scenario.onActivity { main.performLongClick();assertNull(confirmation()) }
         key(KeyEvent.KEYCODE_BACK);BrowserTestUi.waitUntil { browserWindows().isEmpty() }
         assertEquals(2, SavedDlnaFolders(f.context).all().size)
     }
@@ -143,7 +126,7 @@ class SavedFolderRemovalTest {
         for (left in 6 downTo 1) {
             var title = ""
             f.scenario.onActivity { title = (saved()!!.findViewById<ListView>(R.id.dlna_list).getItemAtPosition(0) as DlnaRow).title }
-            confirmFromMore(f, title);approve(f);awaitCount(f, left - 1)
+            confirmFromLongPress(f, title);approve(f);awaitCount(f, left - 1)
         }
         f.scenario.onActivity { assertEquals(R.id.dlna_refresh, saved()!!.findFocus()!!.id) }
         assertTrue(f.sentinel.exists());assertEquals(0, f.client.requests)
@@ -151,14 +134,14 @@ class SavedFolderRemovalTest {
     @Test fun playingFolderCanBeUnregisteredWhileSessionIsRetained() = retained(playing = true)
     @Test fun pausedFolderCanBeUnregisteredWithoutResuming() = retained(playing = false)
     @Test fun backgroundDuringConfirmationKeepsRetainedPlaybackPaused() = retained(playing = true, background = true)
-    @Test fun largeFontMoreAndConfirmationRemainReachable() = withFixture(font = 2f) { f ->
+    @Test fun largeFontRowAndConfirmationRemainReachable() = withFixture(font = 2f) { f ->
         open(f);val row = visibleRow(f, "D19 USB A")
         f.scenario.onActivity {
-            val more = row.findViewById<View>(R.id.saved_folder_more);val bounds = Rect()
-            assertTrue(more.getGlobalVisibleRect(bounds));assertEquals(more.height, bounds.height());assertEquals(more.width, bounds.width())
+            val main = row.findViewById<View>(R.id.saved_folder_open);val bounds = Rect()
+            assertTrue(main.getGlobalVisibleRect(bounds));assertEquals(main.height, bounds.height());assertEquals(main.width, bounds.width())
         }
         screenshot(f, "saved-font200")
-        confirmFromMore(f, "D19 USB A");screenshot(f, "confirmation-font200")
+        confirmFromLongPress(f, "D19 USB A");screenshot(f, "confirmation-font200")
         f.scenario.onActivity {
             for (id in listOf(R.id.dlna_register, R.id.dlna_close)) {
                 val v = confirmation()!!.findViewById<TextView>(id);val bounds=Rect()
@@ -172,7 +155,7 @@ class SavedFolderRemovalTest {
     private fun remove(title: String, next: String?, tv: Boolean = false, only: String? = null) = withFixture(tv, only) { f ->
         open(f)
         val before = f.context.getSharedPreferences("last_playback_folder", Context.MODE_PRIVATE).all.toMap()
-        confirmFromMore(f, title)
+        confirmFromLongPress(f, title)
         f.scenario.onActivity {
             assertEquals(f.context.getString(R.string.folder_unregister_message), confirmation()!!.findViewById<TextView>(R.id.dlna_message).text.toString())
             assertEquals(R.id.dlna_close, confirmation()!!.findFocus()!!.id)
@@ -194,7 +177,7 @@ class SavedFolderRemovalTest {
     private fun cancel(title: String) = withFixture { f ->
         open(f)
         for (action in listOf("close", "back", "escape")) {
-            confirmFromMore(f, title)
+            confirmFromLongPress(f, title)
             if (action == "close") f.scenario.onActivity { confirmation()!!.findViewById<View>(R.id.dlna_close).performClick() }
             else key(if (action == "back") KeyEvent.KEYCODE_BACK else KeyEvent.KEYCODE_ESCAPE)
             awaitFocus(f, title, 6)
@@ -219,7 +202,7 @@ class SavedFolderRemovalTest {
         f.scenario.onActivity { it.findViewById<View>(R.id.btn_overlay_select_folder).performClick() }
         BrowserTestUi.waitUntil { browserWindows().any { it.findViewById<TextView>(R.id.dlna_title).text == f.usb.name } }
         f.scenario.onActivity { browserWindows().single().findViewById<View>(R.id.dlna_up).performClick() }
-        awaitCount(f,6);confirmFromMore(f,"D19 USB A")
+        awaitCount(f,6);confirmFromLongPress(f,"D19 USB A")
         if(background) { f.scenario.moveToState(Lifecycle.State.CREATED);f.scenario.moveToState(Lifecycle.State.RESUMED);awaitConfirmation(f) }
         approve(f);awaitCount(f,5)
         f.scenario.onActivity {
@@ -237,8 +220,11 @@ class SavedFolderRemovalTest {
         BrowserTestUi.waitUntil { saved()!!.findViewById<ListView>(R.id.dlna_list).let { index in it.firstVisiblePosition..it.lastVisiblePosition && it.getChildAt(index-it.firstVisiblePosition)?.isLaidOut==true } }
         var row: View?=null;f.scenario.onActivity { val list=saved()!!.findViewById<ListView>(R.id.dlna_list);row=list.getChildAt(index-list.firstVisiblePosition) };return row!!
     }
-    private fun showMore(f: Fixture,title:String) { val row=visibleRow(f,title);f.scenario.onActivity { row.findViewById<View>(R.id.saved_folder_more).performClick() };BrowserTestUi.waitForText(R.string.folder_unregister) }
-    private fun confirmFromMore(f: Fixture,title:String) { showMore(f,title);BrowserTestUi.tap(R.string.folder_unregister);awaitConfirmation(f) }
+    private fun confirmFromLongPress(f: Fixture,title:String) {
+        val row = visibleRow(f,title)
+        f.scenario.onActivity { assertTrue(row.findViewById<View>(R.id.saved_folder_open).performLongClick()) }
+        awaitConfirmation(f)
+    }
     private fun approve(f:Fixture) { f.scenario.onActivity { confirmation()!!.findViewById<View>(R.id.dlna_register).performClick() } }
     private fun awaitFocus(f:Fixture,title:String,count:Int) { awaitCount(f,count);BrowserTestUi.waitUntil { saved()!!.findViewById<ListView>(R.id.dlna_list).let { (it.selectedItem as? DlnaRow)?.title==title && it.hasFocus() && it.selectedView?.findViewById<View>(R.id.saved_folder_open)?.hasFocus()==true } } }
     private fun awaitCount(f:Fixture,count:Int) = BrowserTestUi.waitUntil { saved()?.let { it.hasWindowFocus() && it.findViewById<ListView>(R.id.dlna_list).count==count && it.findViewById<View>(R.id.dlna_refresh).isEnabled }==true }

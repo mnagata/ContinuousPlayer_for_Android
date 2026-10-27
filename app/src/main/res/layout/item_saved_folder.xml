@@ -3,7 +3,7 @@
     android:descendantFocusability="afterDescendants" android:importantForAccessibility="no">
     <LinearLayout android:id="@+id/saved_folder_open"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:minHeight="56dp" android:paddingStart="12dp" android:paddingEnd="76dp" android:paddingVertical="8dp"
+        android:minHeight="56dp" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingVertical="8dp"
         android:orientation="horizontal" android:gravity="center_vertical"
         android:clickable="true" android:focusable="true" android:importantForAccessibility="yes"
         android:background="@drawable/dlna_row_selector">
@@ -21,9 +21,4 @@
             android:layout_marginStart="4dp" android:text="@string/folder_chevron" android:textColor="#66DFFF" android:textSize="28sp"
             android:gravity="center" android:importantForAccessibility="no" />
     </LinearLayout>
-    <ImageButton android:id="@+id/saved_folder_more" android:layout_width="48dp" android:layout_height="48dp"
-        android:layout_gravity="end|center_vertical" android:layout_marginEnd="8dp" android:padding="12dp"
-        android:src="@drawable/ic_more_vert" android:background="@drawable/home_secondary_button"
-        android:contentDescription="@string/home_more" android:tooltipText="@string/home_more"
-        android:focusable="true" android:importantForAccessibility="yes" />
 </FrameLayout>

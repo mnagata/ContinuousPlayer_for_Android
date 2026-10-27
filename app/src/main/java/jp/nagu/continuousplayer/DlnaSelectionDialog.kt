@@ -55,6 +55,7 @@ internal data class DlnaDialogContent(
     val initialSelection: Int = 0,
     val upLabel: Int = R.string.usb_parent,
     val onUp: (() -> Unit)? = null,
+    val showUpButton: Boolean = true,
     val onRefresh: (() -> Unit)? = null,
     val refreshLabel: Int = R.string.usb_refresh,
     val registerLabel: Int = R.string.folder_register,
@@ -62,7 +63,7 @@ internal data class DlnaDialogContent(
     val onClose: () -> Unit,
     val onSelected: (Int) -> Unit = {},
     val onLongSelected: ((Int) -> Unit)? = null,
-    val onMoreSelected: ((Int) -> Unit)? = null,
+    val savedFolderRows: Boolean = false,
     val initialActionFocus: Int? = null,
     val closeLabel: Int? = null,
     val onManualAddress: (() -> Unit)? = null,
@@ -200,7 +201,6 @@ internal class DlnaSelectionDialog(
         findViewById<View>(R.id.dlna_details).isEnabled = !awaitingDirectory && content.rows.isNotEmpty()
         for (index in 0 until list.childCount) {
             list.getChildAt(index).findViewById<View>(R.id.saved_folder_open)?.isEnabled = !awaitingDirectory
-            list.getChildAt(index).findViewById<View>(R.id.saved_folder_more)?.isEnabled = !awaitingDirectory
         }
         for (id in listOf(R.id.dlna_up, R.id.dlna_refresh, R.id.dlna_register)) {
             findViewById<View>(id).isEnabled = !awaitingDirectory
@@ -225,7 +225,7 @@ internal class DlnaSelectionDialog(
             visibility = if (current.summary.isBlank()) View.GONE else View.VISIBLE
         }
         val up = findViewById<Button>(R.id.dlna_up).apply {
-            visibility = if (current.onUp == null) View.GONE else View.VISIBLE
+            visibility = if (current.onUp == null || !current.showUpButton) View.GONE else View.VISIBLE
             text = if (browserLayout) "" else activity.getString(current.upLabel)
             setCompoundDrawablesRelativeWithIntrinsicBounds(if (browserLayout) R.drawable.ic_browser_back else 0, 0, 0, 0)
             contentDescription = activity.getString(current.upLabel)
@@ -334,7 +334,7 @@ internal class DlnaSelectionDialog(
         }
         list = findViewById<ListView>(R.id.dlna_list).apply {
             adapter = RowAdapter(current)
-            itemsCanFocus = current.onMoreSelected != null
+            itemsCanFocus = current.savedFolderRows
             val gap = when {
                 !browserLayout -> 6
                 activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE -> 1
@@ -362,7 +362,7 @@ internal class DlnaSelectionDialog(
             }
             var contextPress = false
             setOnTouchListener { _, event ->
-                if (current.onMoreSelected != null) return@setOnTouchListener false
+                if (current.savedFolderRows) return@setOnTouchListener false
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     contextPress = event.isPointerInput() && event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)
                     if (contextPress && canInteract()) {
@@ -455,11 +455,11 @@ internal class DlnaSelectionDialog(
             if (isShowing && content === current && list === currentList && !awaitingDirectory) {
                 // Focus the list first so an old focused child cannot keep the old row selected.
                 currentList.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                if (isTv() || current.onMoreSelected != null) currentList.requestFocusFromTouch()
+                if (isTv() || current.savedFolderRows) currentList.requestFocusFromTouch()
                 else if (!currentList.isInTouchMode) currentList.requestFocus()
                 currentList.setSelectionFromTop(position, 0)
                 currentList.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-                if (current.onMoreSelected != null) currentList.doOnPreDraw {
+                if (current.savedFolderRows) currentList.doOnPreDraw {
                     if (isShowing && content === current && list === currentList && !awaitingDirectory && currentList.selectedItemPosition == position) {
                         val open = currentList.selectedView?.findViewById<View>(R.id.saved_folder_open)
                         if (!currentList.isInTouchMode) open?.requestFocus()
@@ -569,14 +569,14 @@ internal class DlnaSelectionDialog(
     private inner class RowAdapter(private val snapshot: DlnaDialogContent) : BaseAdapter() {
         private val rows = snapshot.rows
         private val compact = snapshot.fileSelection
-        private val more = snapshot.onMoreSelected != null
+        private val savedFolders = snapshot.savedFolderRows
         override fun getCount() = rows.size
         override fun getItem(position: Int) = rows[position]
         override fun getItemId(position: Int) = position.toLong()
         @SuppressLint("ClickableViewAccessibility") // Secondary click uses the same accessible long-click action; primary touch stays native.
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val recycled = convertView?.takeIf { (it.findViewById<View>(R.id.saved_folder_open) != null) == more }
-            val view = recycled ?: LayoutInflater.from(activity).inflate(if (more) R.layout.item_saved_folder else R.layout.item_dlna_browser, parent, false)
+            val recycled = convertView?.takeIf { (it.findViewById<View>(R.id.saved_folder_open) != null) == savedFolders }
+            val view = recycled ?: LayoutInflater.from(activity).inflate(if (savedFolders) R.layout.item_saved_folder else R.layout.item_dlna_browser, parent, false)
             val density = activity.resources.displayMetrics.density
             val landscape = compact && activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
             val minHeight = when {
@@ -591,7 +591,7 @@ internal class DlnaSelectionDialog(
                 else -> 8
             }
             val verticalPadding = (padding * density).toInt()
-            if (!more) view.setPadding(view.paddingLeft, verticalPadding, view.paddingRight, verticalPadding)
+            if (!savedFolders) view.setPadding(view.paddingLeft, verticalPadding, view.paddingRight, verticalPadding)
             val row = rows[position]
             view.findViewById<TextView>(R.id.dlna_row_title).apply {
                 text = row.title
@@ -613,7 +613,7 @@ internal class DlnaSelectionDialog(
             }
             view.tooltipText = if (snapshot.fileSelection) rowInformation(row) else null
             val description = if (row.detail.isBlank()) row.description else "${row.description}。${row.detail}"
-            if (!more) {
+            if (!savedFolders) {
                 view.contentDescription = description
                 // Hover still exposes the tooltip; ListView owns taps and long presses.
                 // setTooltipText otherwise makes the child consume those gestures.
@@ -651,16 +651,16 @@ internal class DlnaSelectionDialog(
             } else {
                 fun active() = isShowing && content === snapshot && !awaitingDirectory
                 val open = view.findViewById<View>(R.id.saved_folder_open)
-                val actions = view.findViewById<View>(R.id.saved_folder_more)
                 open.contentDescription = "$description。${activity.getString(R.string.saved_folder_open)}"
                 open.accessibilityDelegate = object : View.AccessibilityDelegate() {
                     override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
                         super.onInitializeAccessibilityNodeInfo(host, info)
                         info.className = Button::class.java.name
+                        info.addAction(AccessibilityNodeInfo.AccessibilityAction(
+                            AccessibilityNodeInfo.ACTION_LONG_CLICK, activity.getString(R.string.folder_unregister)))
                     }
                 }
                 open.isEnabled = !awaitingDirectory
-                actions.isEnabled = !awaitingDirectory
                 open.setOnClickListener { if (active()) snapshot.onSelected(position) }
                 open.setOnLongClickListener {
                     if (active()) snapshot.onLongSelected?.invoke(position)
@@ -680,24 +680,7 @@ internal class DlnaSelectionDialog(
                     event.isPointerInput() && event.actionButton == MotionEvent.BUTTON_SECONDARY &&
                         (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE)
                 }
-                actions.contentDescription = activity.getString(R.string.saved_folder_more, row.title) +
-                    if (row.detail.isBlank()) "" else "。${row.detail}"
-                actions.setOnClickListener { if (active()) snapshot.onMoreSelected?.invoke(position) }
-                open.nextFocusRightId = actions.id
-                actions.nextFocusLeftId = open.id
-                // ListView's horizontal focus search rejects overlapping row/control bounds.
-                // Move between these two explicit actions before delegating vertical navigation.
-                open.setOnKeyListener { _, code, event ->
-                    val move = (code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_TAB) && event.hasNoModifiers()
-                    if (move && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && active()) actions.requestFocus()
-                    move
-                }
-                actions.setOnKeyListener { _, code, event ->
-                    val move = (code == KeyEvent.KEYCODE_DPAD_LEFT && event.hasNoModifiers()) ||
-                        (code == KeyEvent.KEYCODE_TAB && event.hasModifiers(KeyEvent.META_SHIFT_ON))
-                    if (move && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && active()) open.requestFocus()
-                    move
-                }
+
             }
             return view
         }

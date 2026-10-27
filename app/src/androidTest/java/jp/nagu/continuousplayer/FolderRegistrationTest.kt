@@ -177,6 +177,7 @@ class FolderRegistrationTest {
     private fun cancelAddition(seed: Boolean = true, tv: Boolean = false) = withFixture(tv, seed) { f ->
         for (action in listOf("close", "back", "escape")) {
             openAddition(f)
+            if (!seed && action == "close") screenshot(f, if (tv) "add-source-tv" else "add-source")
             if (action == "close") closeBrowser(f) else key(if (action == "back") KeyEvent.KEYCODE_BACK else KeyEvent.KEYCODE_ESCAPE)
             awaitSaved(f, if (seed) 3 else 0)
             assertNull(player(f))
@@ -232,6 +233,10 @@ class FolderRegistrationTest {
         awaitTitle(f, R.string.saf_choose_folder)
         f.scenario.onActivity { window()!!.findViewById<View>(R.id.dlna_refresh).performClick() }
         awaitTitle(f, R.string.saf_add_folder)
+        f.scenario.onActivity {
+            assertEquals(View.GONE, window()!!.findViewById<View>(R.id.dlna_up).visibility)
+            assertTrue(window()!!.findViewById<View>(R.id.dlna_close).isShown)
+        }
     }
     private fun choose(f: Fixture, resource: Int) = choose(f, f.context.getString(resource))
     private fun choose(f: Fixture, title: String) = f.scenario.onActivity {
