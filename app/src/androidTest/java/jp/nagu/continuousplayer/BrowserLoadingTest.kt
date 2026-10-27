@@ -128,7 +128,6 @@ class BrowserLoadingTest {
                 view.findViewById<View>(R.id.dlna_register).performClick()
                 view.findViewById<View>(R.id.dlna_refresh).performClick()
                 view.findViewById<View>(R.id.dlna_up).performClick()
-                view.findViewById<View>(R.id.dlna_details).performClick()
                 list.performItemClick(list.getChildAt(0),25,list.adapter.getItemId(25))
                 assertSame(request,f.request());assertEquals(0,f.selected)
             }

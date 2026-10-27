@@ -92,14 +92,6 @@ class MediaPresentationUiTest {
                 list.setSelectionFromTop(index, 0)
             }
             BrowserTestUi.waitUntil { (browser().findViewById<ListView>(R.id.dlna_list).selectedItem as? DlnaRow)?.formatBadge == "M4V" }
-            scenario.onActivity { browser().findViewById<View>(R.id.dlna_details).performClick() }
-            awaitInfo()
-            scenario.onActivity {
-                assertTrue(info().findViewById<TextView>(R.id.dlna_message).text.toString().contains("Episode.part.1.m4v"))
-                assertNull(selected)
-                info().findViewById<View>(R.id.dlna_close).performClick()
-            }
-            BrowserTestUi.waitUntil { browser().hasWindowFocus() && browser().findViewById<ListView>(R.id.dlna_list).selectedItem == chosen }
             scenario.onActivity {
                 val list = browser().findViewById<ListView>(R.id.dlna_list)
                 assertEquals(chosen, list.selectedItem)
@@ -115,18 +107,17 @@ class MediaPresentationUiTest {
         }
     }
 
-    @Test fun longPressOpensFullNameWithoutPlayback() = direct { scenario, dialog, _ ->
+    @Test fun longPressDoesNotOpenInformationOrStartPlayback() = direct { scenario, dialog, _ ->
         instrumentation.waitForIdleSync();SystemClock.sleep(500)
         BrowserTestUi.tap(longName.removeSuffix(".mp4"), longPress = true)
-        awaitInfo()
-        scenario.onActivity { assertTrue(info().findViewById<TextView>(R.id.dlna_message).text.toString().contains(longName)) }
-        screenshot("long-name")
-        key(KeyEvent.KEYCODE_ESCAPE)
-        BrowserTestUi.waitUntil { dialog.window!!.decorView.hasWindowFocus() && dialog.findViewById<ListView>(R.id.dlna_list).selectedItemPosition == 2 }
-        scenario.onActivity { assertEquals(2, dialog.findViewById<ListView>(R.id.dlna_list).selectedItemPosition) }
+        instrumentation.waitForIdleSync()
+        scenario.onActivity {
+            assertEquals(1, windows().size)
+            assertTrue(dialog.window!!.decorView.hasWindowFocus())
+        }
     }
 
-    @Test fun secondaryPointerOpensInformationWithoutSelecting() = direct { scenario, dialog, _ ->
+    @Test fun secondaryPointerDoesNotOpenInformationOrSelectFile() = direct { scenario, dialog, _ ->
         instrumentation.waitForIdleSync();SystemClock.sleep(500)
         var x=0f;var y=0f
         scenario.onActivity {
@@ -145,43 +136,25 @@ class MediaPresentationUiTest {
                 if(a==MotionEvent.ACTION_DOWN)MotionEvent.BUTTON_SECONDARY else 0,1f,1f,0,0,InputDevice.SOURCE_MOUSE,0)
             assertTrue(instrumentation.uiAutomation.injectInputEvent(event,true));event.recycle()
         }
-        try { awaitInfo() } catch (error:AssertionError) { screenshot("pointer-failure");throw error }
-        scenario.onActivity { assertTrue(info().findViewById<TextView>(R.id.dlna_message).text.toString().contains(longName)) }
+        instrumentation.waitForIdleSync()
+        scenario.onActivity {
+            assertEquals(1, windows().size)
+            assertTrue(dialog.window!!.decorView.hasWindowFocus())
+        }
     }
 
-    @Test fun remoteDetailsReturnsToSelectedRow() = direct(tv = true) { scenario, dialog, _ ->
-        scenario.onActivity { dialog.findViewById<ListView>(R.id.dlna_list).requestFocusFromTouch() }
-        key(KeyEvent.KEYCODE_DPAD_DOWN)
-        scenario.onActivity { assertTrue(dialog.findViewById<View>(R.id.dlna_details).hasFocus()) }
-        key(KeyEvent.KEYCODE_DPAD_CENTER);awaitInfo()
-        key(KeyEvent.KEYCODE_BACK)
-        BrowserTestUi.waitUntil { dialog.findViewById<ListView>(R.id.dlna_list).let { it.hasFocus() && it.selectedItemPosition == 2 } }
-        scenario.onActivity { assertEquals(2, dialog.findViewById<ListView>(R.id.dlna_list).selectedItemPosition) }
-    }
-
-    @Test fun configurationKeepsInformationAndFullName() = direct { scenario, dialog, _ ->
-        scenario.onActivity { dialog.findViewById<View>(R.id.dlna_details).performClick() };awaitInfo()
-        scenario.onActivity { dialog.refreshForConfiguration();assertEquals(longName, info().findViewById<TextView>(R.id.dlna_message).text.toString().substringAfter("元の名前\n").substringBefore("\n\n")) }
-        BrowserTestUi.waitForText(android.R.string.ok)
-    }
-
-    @Test fun changedContentClosesStaleInformation() = direct { scenario, dialog, content ->
-        scenario.onActivity { dialog.findViewById<View>(R.id.dlna_details).performClick() };awaitInfo()
-        scenario.onActivity { dialog.updateContent(content.copy(rows = emptyList(), message = "Empty")) }
-        BrowserTestUi.waitUntil { windows().none { title(it) == context.getString(R.string.info) } }
-        scenario.onActivity { assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_details).visibility) }
-    }
-
-    @Test fun loadingDisablesInformationAndClosesChild() = direct { scenario, dialog, _ ->
-        scenario.onActivity { dialog.findViewById<View>(R.id.dlna_details).performClick() };awaitInfo()
-        scenario.onActivity { assertTrue(dialog.keepListWhileLoading());assertFalse(dialog.findViewById<View>(R.id.dlna_details).isEnabled) }
-        BrowserTestUi.waitUntil { windows().none { title(it) == context.getString(R.string.info) } }
-    }
-
-    @Test fun dismissingBrowserClosesInformation() = direct { scenario, dialog, _ ->
-        scenario.onActivity { dialog.findViewById<View>(R.id.dlna_details).performClick() };awaitInfo()
-        scenario.onActivity { dialog.dismiss() }
-        BrowserTestUi.waitUntil { windows().isEmpty() }
+    @Test fun remoteLongPressDoesNotOpenInformationOrSelectFile() = direct(tv = true) { scenario, dialog, _ ->
+        scenario.onActivity {
+            dialog.findViewById<ListView>(R.id.dlna_list).requestFocusFromTouch()
+            assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_bottom_actions).visibility)
+        }
+        longKey(KeyEvent.KEYCODE_DPAD_CENTER)
+        instrumentation.waitForIdleSync()
+        scenario.onActivity {
+            assertEquals(1, windows().size)
+            assertTrue(dialog.window!!.decorView.hasWindowFocus())
+            assertEquals(2, dialog.findViewById<ListView>(R.id.dlna_list).selectedItemPosition)
+        }
     }
 
     @Test fun badgesAndActionsFitWithNormalText() = fit(false)
@@ -196,9 +169,9 @@ class MediaPresentationUiTest {
             val badge = list.getChildAt(0).findViewById<TextView>(R.id.dlna_row_format)
             assertTrue(badge.isShown);assertEquals("MP4", badge.text.toString())
             assertTrue(badge.layout.getEllipsisCount(0) == 0)
-            val details = dialog.findViewById<Button>(R.id.dlna_details)
-            assertTrue(details.isShown && details.width >= 48 * it.resources.displayMetrics.density)
-            assertTrue(details.layout.height <= details.height - details.compoundPaddingTop - details.compoundPaddingBottom)
+            val bottom = dialog.findViewById<android.view.ViewGroup>(R.id.dlna_bottom_actions)
+            assertEquals(listOf(R.id.dlna_register), (0 until bottom.childCount)
+                .map { index -> bottom.getChildAt(index) }.filter { view -> view.isShown }.map { view -> view.id })
             val register=dialog.findViewById<Button>(R.id.dlna_register)
             assertTrue(register.layout.height <= register.height - register.compoundPaddingTop - register.compoundPaddingBottom)
             assertTrue("At least one complete media row must fit", list.height >= list.getChildAt(0).height)
@@ -231,7 +204,7 @@ class MediaPresentationUiTest {
         }
     }
 
-    @Test fun nameInformationPreservesRetainedPlayback() = fixture { scenario, directory ->
+    @Test fun fileLongPressKeepsRetainedPlaybackPaused() = fixture { scenario, directory ->
         val data = ByteArray(8_000 * 2 * 90)
         val wave = ByteBuffer.allocate(data.size + 44).order(ByteOrder.LITTLE_ENDIAN).put("RIFF".toByteArray()).putInt(data.size+36)
             .put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(8_000).putInt(16_000).putShort(2).putShort(16)
@@ -246,15 +219,13 @@ class MediaPresentationUiTest {
         BrowserTestUi.waitUntil { var ready=false;scenario.onActivity { player=it.findViewById<PlayerView>(R.id.player_view).player!!;ready=player.isPlaying };ready }
         scenario.onActivity { player.seekTo(30_000);it.findViewById<View>(R.id.btn_overlay_select_folder).performClick() }
         BrowserTestUi.waitUntil { windows().any { it.hasWindowFocus() && it.findViewById<ListView>(R.id.dlna_list)?.isEnabled==true } }
-        scenario.onActivity { browser().findViewById<View>(R.id.dlna_details).performClick() };awaitInfo()
+        scenario.onActivity { longPressSelectedRow(browser());assertEquals(1, windows().size) }
         key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
         scenario.onActivity {
             assertSame(player, it.findViewById<PlayerView>(R.id.player_view).player)
             assertFalse(player.playWhenReady);assertTrue(player.currentPosition in 29_000..31_000)
             assertEquals(1, player.mediaItemCount)
         }
-        key(KeyEvent.KEYCODE_ESCAPE)
-        BrowserTestUi.waitUntil { browser().hasWindowFocus() }
         scenario.onActivity { assertFalse(player.playWhenReady);browser().findViewById<View>(R.id.dlna_close).performClick() }
         BrowserTestUi.waitUntil { player.playWhenReady }
     }
@@ -269,7 +240,7 @@ class MediaPresentationUiTest {
             @Suppress("DEPRECATION") activity.resources.updateConfiguration(config, activity.resources.displayMetrics)
             content=DlnaDialogContent("D21 presentation", label=null, fileSelection=true,
                 rows=mediaBrowserRows(activity,listOf(item("Episode.part.1.mp4"),item("Episode.part.1.m4v"),item(longName)),emptyList()),
-                initialSelection=2, onClose={}, onSelected={ fail("Information must not select a media file") })
+                initialSelection=2, onClose={}, onSelected={ fail("Long press or secondary click must not select a media file") })
             dialog=DlnaSelectionDialog(activity,content);dialog.show()
         }
         try {
@@ -277,11 +248,21 @@ class MediaPresentationUiTest {
             action(scenario,dialog,content)
         } finally { scenario.onActivity { dialog.dismiss();@Suppress("DEPRECATION") it.resources.updateConfiguration(original,it.resources.displayMetrics) } }
     }
+    private fun longPressSelectedRow(root: View) {
+        val list = root.findViewById<ListView>(R.id.dlna_list)
+        val index = list.selectedItemPosition.takeIf { it >= 0 } ?: list.firstVisiblePosition
+        assertTrue(list.onItemLongClickListener!!.onItemLongClick(list,
+            list.getChildAt(index - list.firstVisiblePosition), index, list.adapter.getItemId(index)))
+    }
+    private fun longKey(code: Int) {
+        val down = SystemClock.uptimeMillis()
+        assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, down, KeyEvent.ACTION_DOWN, code, 0), true))
+        SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200)
+        assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0), true))
+    }
     private fun windows()=WindowInspector.getGlobalWindowViews().filter { it.findViewById<TextView>(R.id.dlna_title)!=null && it.isAttachedToWindow }
     private fun title(view:View)=view.findViewById<TextView>(R.id.dlna_title).text.toString()
     private fun browser()=windows().single { title(it)!=context.getString(R.string.info) }
-    private fun info()=windows().single { title(it)==context.getString(R.string.info) }
-    private fun awaitInfo()=BrowserTestUi.waitUntil { windows().any { title(it)==context.getString(R.string.info) && it.hasWindowFocus() } }
     private fun key(code:Int) { instrumentation.waitForIdleSync();SystemClock.sleep(500);val down=SystemClock.uptimeMillis();for(action in listOf(KeyEvent.ACTION_DOWN,KeyEvent.ACTION_UP))assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent(down,SystemClock.uptimeMillis(),action,code,0),true)) }
     private fun screenshot(name:String) { instrumentation.waitForIdleSync();SystemClock.sleep(600);File(context.filesDir,"d21-$name-${context.resources.configuration.screenWidthDp}dp.png").outputStream().use { assertTrue(instrumentation.uiAutomation.takeScreenshot()!!.compress(Bitmap.CompressFormat.PNG,100,it)) } }
     private fun fixture(action:(ActivityScenario<MainActivity>,File)->Unit) {
