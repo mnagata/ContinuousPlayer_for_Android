@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
+import android.widget.AdapterView
 import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.ImageView
@@ -31,7 +32,9 @@ internal data class DlnaRow(
     val title: String,
     val icon: Int,
     val detail: String = "",
-    val description: String = title
+    val description: String = title,
+    val media: VideoItem? = null,
+    val formatBadge: String? = null
 )
 
 internal data class DlnaDialogContent(
@@ -54,7 +57,8 @@ internal data class DlnaDialogContent(
     val onSelected: (Int) -> Unit = {},
     val onLongSelected: ((Int) -> Unit)? = null,
     val onMoreSelected: ((Int) -> Unit)? = null,
-    val initialActionFocus: Int? = null
+    val initialActionFocus: Int? = null,
+    val closeLabel: Int? = null
 )
 
 /** One persistent window whose content changes during navigation and loading. */
@@ -64,6 +68,7 @@ internal class DlnaSelectionDialog(
 ) : ComponentDialog(activity) {
     private lateinit var list: ListView
     private var awaitingDirectory = false
+    private var mediaInformation: DlnaSelectionDialog? = null
     private var playbackCloseToken: Any? = null
     private val loadingHandler = Handler(Looper.getMainLooper())
     private var pendingProgressVisible = false
@@ -132,6 +137,7 @@ internal class DlnaSelectionDialog(
     }
 
     fun updateContent(next: DlnaDialogContent) {
+        closeMediaInformation()
         clearPendingProgress()
         playbackCloseToken = null
         awaitingDirectory = false
@@ -143,6 +149,7 @@ internal class DlnaSelectionDialog(
     /** Keep the current list and scroll position visible until navigation finishes. */
     fun keepListWhileLoading(onClose: (() -> Unit)? = null, showLoadingIndicator: Boolean = false): Boolean {
         if (!isShowing || (content.rows.isEmpty() && !content.fileSelection)) return false
+        closeMediaInformation()
         clearPendingProgress()
         if (onClose != null) content = content.copy(onClose = onClose)
         playbackCloseToken = null
@@ -170,6 +177,7 @@ internal class DlnaSelectionDialog(
         findViewById<View>(R.id.dlna_pending_progress).visibility =
             if (awaitingDirectory && pendingProgressVisible) View.VISIBLE else View.GONE
         list.isEnabled = !awaitingDirectory
+        findViewById<View>(R.id.dlna_details).isEnabled = !awaitingDirectory && content.rows.isNotEmpty()
         for (index in 0 until list.childCount) {
             list.getChildAt(index).findViewById<View>(R.id.saved_folder_open)?.isEnabled = !awaitingDirectory
             list.getChildAt(index).findViewById<View>(R.id.saved_folder_more)?.isEnabled = !awaitingDirectory
@@ -213,13 +221,22 @@ internal class DlnaSelectionDialog(
             setOnClickListener { current.onRefresh?.invoke() }
         }
         val close = findViewById<Button>(R.id.dlna_close).apply {
-            setText(if (current.fileSelection) R.string.file_browser_cancel else R.string.dlna_close)
+            setText(current.closeLabel ?: if (current.fileSelection) R.string.file_browser_cancel else R.string.dlna_close)
             setOnClickListener { dismiss(); content.onClose() }
         }
         val register = findViewById<Button>(R.id.dlna_register).apply {
             visibility = if (current.onRegister == null) View.GONE else View.VISIBLE
             setText(current.registerLabel)
             setOnClickListener { current.onRegister?.invoke() }
+        }
+        val details = findViewById<Button>(R.id.dlna_details).apply {
+            visibility = if (current.fileSelection && current.rows.isNotEmpty()) View.VISIBLE else View.GONE
+            setOnClickListener {
+                if (content === current && current.fileSelection && current.rows.isNotEmpty()) {
+                    val index = list.selectedItemPosition.takeIf { it in current.rows.indices } ?: current.initialSelection.coerceIn(current.rows.indices)
+                    showMediaInformation(current, index)
+                }
+            }
         }
         val topRow = findViewById<LinearLayout>(R.id.dlna_top_actions)
         val bottomRow = findViewById<LinearLayout>(R.id.dlna_bottom_actions)
@@ -267,11 +284,11 @@ internal class DlnaSelectionDialog(
             }
         }
         val topActions = listOf(up, close, refresh).filter { it.parent === topRow && it.visibility == View.VISIBLE }
-        val bottomActions = listOf(register, refresh, close).filter { it.parent === bottomRow && it.visibility == View.VISIBLE }
+        val bottomActions = listOf(register, refresh, details, close).filter { it.parent === bottomRow && it.visibility == View.VISIBLE }
         val spacing = (12 * activity.resources.displayMetrics.density).toInt()
         listOf(topRow to topActions, bottomRow to bottomActions).forEach { (row, actions) ->
             row.visibility = if (actions.isEmpty()) View.GONE else View.VISIBLE
-            val slots = if (row === topRow) listOf(up, close, refresh) else listOf(register, refresh, close)
+            val slots = if (row === topRow) listOf(up, close, refresh) else listOf(register, refresh, details, close)
             val layoutButtons = slots.filter { it.parent === row && it.visibility != View.GONE }
             layoutButtons.forEachIndexed { index, button ->
                 button.updateLayoutParams<LinearLayout.LayoutParams> {
@@ -304,9 +321,18 @@ internal class DlnaSelectionDialog(
                 if (!awaitingDirectory) current.onSelected(position)
             }
             setOnItemLongClickListener { _, _, position, _ ->
-                if (awaitingDirectory) false else current.onLongSelected?.let { it(position); true } ?: false
+                if (awaitingDirectory) false
+                else current.onLongSelected?.let { it(position); true }
+                    ?: if (current.fileSelection) { showMediaInformation(current, position);true } else false
             }
-            isLongClickable = current.onLongSelected != null
+            isLongClickable = current.onLongSelected != null || current.fileSelection
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    details.contentDescription = if (current.fileSelection) activity.getString(R.string.media_name_format) + "。" +
+                        (current.rows.getOrNull(position)?.media?.displayName ?: current.rows.getOrNull(position)?.title.orEmpty()) else null
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
             var contextPress = false
             setOnTouchListener { _, event ->
                 if (current.onMoreSelected != null) return@setOnTouchListener false
@@ -314,7 +340,10 @@ internal class DlnaSelectionDialog(
                     contextPress = event.isPointerInput() && event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)
                     if (contextPress && !awaitingDirectory) {
                         val position = pointToPosition(event.x.toInt(), event.y.toInt())
-                        if (position != ListView.INVALID_POSITION) current.onLongSelected?.invoke(position)
+                        if (position != ListView.INVALID_POSITION) {
+                            if (current.onLongSelected != null) current.onLongSelected.invoke(position)
+                            else if (current.fileSelection) showMediaInformation(current, position)
+                        }
                     }
                 }
                 val handled = contextPress
@@ -333,8 +362,10 @@ internal class DlnaSelectionDialog(
         findViewById<TextView>(R.id.dlna_message).text = current.message
         findViewById<View>(R.id.dlna_progress).visibility = if (current.loading) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.dlna_hint).apply {
-            visibility = if (current.rows.isEmpty() || activity.resources.configuration.orientation ==
-                Configuration.ORIENTATION_LANDSCAPE) View.GONE else View.VISIBLE
+            val configuration = activity.resources.configuration
+            val needsListSpace = current.fileSelection && configuration.fontScale >= 1.5f && configuration.screenHeightDp < 700
+            visibility = if (current.rows.isEmpty() || configuration.orientation ==
+                Configuration.ORIENTATION_LANDSCAPE || needsListSpace) View.GONE else View.VISIBLE
             setText(if (current.fileSelection) {
                 if (isTv()) R.string.file_browser_tv_hint else R.string.file_browser_hint
             } else current.hint ?: if (current.onUp == null) R.string.dlna_server_hint else if (isTv()) R.string.dlna_tv_hint else R.string.dlna_touch_hint)
@@ -388,6 +419,48 @@ internal class DlnaSelectionDialog(
         }
     }
 
+    private fun rowInformation(row: DlnaRow): String {
+        val name = row.media?.displayName ?: row.title
+        val format = row.media?.formatLabel ?: activity.getString(
+            if (row.media == null && row.icon == R.drawable.ic_folder_open) R.string.media_folder_format else R.string.media_format_unknown)
+        return buildString {
+            append(activity.getString(R.string.media_original_name));append("\n");append(name)
+            append("\n\n");append(activity.getString(R.string.media_format));append("\n");append(format)
+            row.media?.mimeType?.takeIf { it.isNotBlank() }?.let { append("\n\nMIME type\n");append(it) }
+        }
+    }
+
+    private fun showMediaInformation(snapshot: DlnaDialogContent, position: Int) {
+        if (!isShowing || content !== snapshot || awaitingDirectory || !snapshot.fileSelection) return
+        val row = snapshot.rows.getOrNull(position) ?: return
+        if (mediaInformation?.isShowing == true) return
+        list.setSelectionFromTop(position, 0)
+        lateinit var info: DlnaSelectionDialog
+        info = DlnaSelectionDialog(activity, DlnaDialogContent(
+            title = activity.getString(R.string.info), label = null,
+            message = rowInformation(row), closeLabel = android.R.string.ok,
+            initialActionFocus = R.id.dlna_close,
+            onClose = {
+                if (mediaInformation === info) {
+                    mediaInformation = null
+                    info.dismiss()
+                    if (isShowing && content === snapshot && !awaitingDirectory) focusRow(position)
+                }
+            }))
+        mediaInformation = info
+        info.show()
+    }
+
+    private fun closeMediaInformation() {
+        mediaInformation?.dismiss()
+        mediaInformation = null
+    }
+
+    override fun dismiss() {
+        closeMediaInformation()
+        super.dismiss()
+    }
+
     override fun onStart() {
         super.onStart()
         updateWindowSize()
@@ -417,7 +490,8 @@ internal class DlnaSelectionDialog(
         setContentView(R.layout.dialog_dlna_browser)
         renderContent()
         updateWindowSize()
-        focusSelection()
+        if (mediaInformation?.isShowing == true) mediaInformation?.refreshForConfiguration()
+        else focusSelection()
     }
 
     private fun isTv() = activity.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK ==
@@ -464,9 +538,48 @@ internal class DlnaSelectionDialog(
             }
             view.findViewById<ImageView>(R.id.dlna_row_icon).setImageResource(
                 if (compact && row.icon == R.drawable.ic_play) R.drawable.ic_browser_play else row.icon)
+            view.findViewById<TextView>(R.id.dlna_row_format)?.apply {
+                text = row.formatBadge.orEmpty()
+                visibility = if (row.formatBadge == null) View.GONE else View.VISIBLE
+            }
+            view.tooltipText = if (snapshot.fileSelection) rowInformation(row) else null
             val description = if (row.detail.isBlank()) row.description else "${row.description}。${row.detail}"
-            if (!more) view.contentDescription = description
-            else {
+            if (!more) {
+                view.contentDescription = description
+                // Hover still exposes the tooltip; ListView owns taps and long presses.
+                // setTooltipText otherwise makes the child consume those gestures.
+                view.isClickable = false
+                view.isLongClickable = false
+                // A mouse can target the row itself before ListView receives the event.
+                var contextPress = false
+                view.setOnTouchListener { _, event ->
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                        // A native tooltip consumes touch even on a non-clickable View.
+                        // Keep it for hover, and let the list own the press gesture.
+                        view.tooltipText = null
+                        contextPress = event.isPointerInput() && event.isButtonPressed(MotionEvent.BUTTON_SECONDARY)
+                        if (contextPress && isShowing && content === snapshot && !awaitingDirectory) {
+                            if (snapshot.onLongSelected != null) snapshot.onLongSelected.invoke(position)
+                            else if (snapshot.fileSelection) showMediaInformation(snapshot, position)
+                        }
+                    }
+                    val handled = contextPress
+                    if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) contextPress = false
+                    handled
+                }
+                view.setOnHoverListener { _, event ->
+                    if (snapshot.fileSelection && view.tooltipText == null &&
+                        (event.actionMasked == MotionEvent.ACTION_HOVER_ENTER || event.actionMasked == MotionEvent.ACTION_HOVER_MOVE)) {
+                        view.tooltipText = rowInformation(row)
+                        view.isLongClickable = false
+                    }
+                    false
+                }
+                view.setOnGenericMotionListener { _, event ->
+                    event.isPointerInput() && event.actionButton == MotionEvent.BUTTON_SECONDARY &&
+                        (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE)
+                }
+            } else {
                 fun active() = isShowing && content === snapshot && !awaitingDirectory
                 val open = view.findViewById<View>(R.id.saved_folder_open)
                 val actions = view.findViewById<View>(R.id.saved_folder_more)

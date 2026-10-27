@@ -88,12 +88,7 @@ internal class UsbPlaybackBrowser(
                 label = null,
                 fileSelection = true,
                 rows = folders.map { DlnaRow(it.name, R.drawable.ic_folder_open,
-                    description = "${it.name}。${activity.getString(R.string.dlna_folder_detail)}") } + media.map {
-                    val audio = it.displayName.substringAfterLast('.').lowercase(Locale.ROOT) in
-                        setOf("mp3", "flac", "m4a", "aac", "wav", "ogg", "opus")
-                    DlnaRow(it.selectionTitle, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
-                        description = "${it.selectionTitle}。${activity.getString(if (audio) R.string.dlna_audio_detail else R.string.dlna_video_detail)}")
-                },
+                    description = "${it.name}。${activity.getString(R.string.dlna_folder_detail)}") } + mediaBrowserRows(activity, media, folders.map { it.name }),
                 message = activity.getString(R.string.usb_empty),
                 initialSelection = if (mediaSelection >= 0) folders.size + mediaSelection
                     else folders.indexOf(focusChild).coerceAtLeast(0),

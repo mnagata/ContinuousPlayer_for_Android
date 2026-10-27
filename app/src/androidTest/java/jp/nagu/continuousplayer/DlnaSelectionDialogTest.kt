@@ -243,7 +243,8 @@ class DlnaSelectionDialogTest {
                     assertTrue(up.right <= close.left)
                     assertTrue(close.right <= title.left)
                     assertTrue(title.right <= refresh.left)
-                    assertEquals(View.GONE, dialog.findViewById<View>(R.id.dlna_bottom_actions).visibility)
+                    assertEquals(View.VISIBLE, dialog.findViewById<View>(R.id.dlna_bottom_actions).visibility)
+                    assertTrue(dialog.findViewById<View>(R.id.dlna_details).isShown)
                 }
                 screenshot(name)
             }

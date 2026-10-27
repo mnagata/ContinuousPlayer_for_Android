@@ -37,7 +37,10 @@ public class ScrollFixtureProvider extends DocumentsProvider {
 
     @Override public Cursor queryChildDocuments(String parent, String[] projection, String sortOrder) {
         MatrixCursor cursor = new MatrixCursor(COLUMNS);
-        if (parent.equals("root")) {
+        if (parent.equals("d21-format")) {
+            cursor.addRow(new Object[]{"d21-format/mp4", "Episode.part.1.mp4", "video/mp4", 1L, 0L});
+            cursor.addRow(new Object[]{"d21-format/m4v", "Episode.part.1.m4v", "video/mp4", 1L, 0L});
+        } else if (parent.equals("root")) {
             for (int i = 0; i < 40; i++) cursor.addRow(row(String.format(Locale.ROOT, "season-%02d", i)));
         } else if (parent.equals("focus-fixture")) {
             for (int i = 0; i < 40; i++) cursor.addRow(row(String.format(Locale.ROOT, "focus-fixture/folder-%02d", i)));

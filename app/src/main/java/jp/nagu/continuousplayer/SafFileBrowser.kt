@@ -271,14 +271,7 @@ class SafFileBrowser(
         val (folders, media) = withContext(Dispatchers.IO) { reader.read(path.last()) }
         val mediaSelection = if (focusUri != null) media.indexOfFirst { it.uri == focusUri.toString() } else -1
         val rows = folders.map { DlnaRow(it.title, R.drawable.ic_folder_open,
-            description = "${it.title}。${activity.getString(R.string.dlna_folder_detail)}") } + media.map {
-            val audio = it.mimeType?.startsWith("audio/") == true ||
-                it.displayName.substringAfterLast('.').lowercase(java.util.Locale.ROOT) in
-                setOf("mp3", "flac", "m4a", "aac", "wav", "ogg", "opus")
-            val action = activity.getString(if (audio) R.string.dlna_audio_detail else R.string.dlna_video_detail)
-            DlnaRow(it.selectionTitle, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
-                description = "${it.selectionTitle}。$action")
-        }
+            description = "${it.title}。${activity.getString(R.string.dlna_folder_detail)}") } + mediaBrowserRows(activity, media, folders.map { it.title })
         showDialog(DlnaDialogContent(
             title = path.last().title,
             label = null,

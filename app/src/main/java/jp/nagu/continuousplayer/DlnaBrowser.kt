@@ -171,14 +171,7 @@ class DlnaBrowser(
         })
         val mediaSelection = if (focusId != null) videos.indexOfFirst { it.dlnaObjectId == focusId } else -1
         val rows = folders.map { DlnaRow(it.title, R.drawable.ic_folder_open,
-            description = "${it.title}。${activity.getString(R.string.dlna_folder_detail)}") } + videos.map { media ->
-            val audio = media.mimeType?.startsWith("audio/") == true ||
-                media.displayName.substringAfterLast('.').lowercase() in
-                setOf("mp3", "flac", "m4a", "aac", "wav", "ogg", "opus")
-            val action = activity.getString(if (audio) R.string.dlna_audio_detail else R.string.dlna_video_detail)
-            DlnaRow(media.selectionTitle, if (audio) R.drawable.ic_dlna_audio else R.drawable.ic_play,
-                description = "${media.selectionTitle}。$action")
-        }
+            description = "${it.title}。${activity.getString(R.string.dlna_folder_detail)}") } + mediaBrowserRows(activity, videos, folders.map { it.title })
         val content = DlnaDialogContent(
             title = path.last().title,
             label = null,
