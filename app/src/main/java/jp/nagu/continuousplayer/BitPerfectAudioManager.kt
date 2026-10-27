@@ -16,7 +16,7 @@ import android.util.Log
  * 設定し、動画の音声をビットパーフェクトで出力する。
  * 使用後は [release] でミキサー設定をクリアすること。
  */
-class BitPerfectAudioManager(private val context: Context) {
+open class BitPerfectAudioManager(private val context: Context) {
 
     companion object {
         private const val TAG = "BitPerfectAudio"
@@ -109,111 +109,55 @@ class BitPerfectAudioManager(private val context: Context) {
         }
     }
 
-    /**
-     * 現在のオーディオ出力状態を人間可読な文字列で返す。
-     *
-     * 出力デバイス名、ビットパーフェクト状態、サンプルレート、チャンネル数、
-     * ミキサーアトリビュート情報を含む。
-     *
-     * @param videoUri 現在再生中の動画URI（フォーマット情報抽出用、nullの場合はスキップ）
-     * @return フォーマット済みのオーディオ情報文字列
-     */
-    fun getAudioOutputInfo(videoUri: Uri?): String {
-        val sb = StringBuilder()
-
-        // Output device
-        val outputDevice = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .firstOrNull {
-                it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
-                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET
-            }
-        val deviceName = outputDevice?.productName?.takeIf { it.isNotBlank() }
-            ?: getDeviceTypeName(outputDevice?.type)
-        sb.appendLine("Output: $deviceName")
-
-        // Bit-perfect status
-        if (activeDevice != null) {
-            sb.appendLine("Mode: Bit-Perfect")
-        } else {
-            sb.appendLine("Mode: Standard")
+    /** Describe the observed route and configured AudioTrack, without reopening the media. */
+    internal open fun getOutputInformation(track: AudioTrackInformation): AudioOutputInformation {
+        val base = AudioOutputInformation(
+            encoding = track.encoding?.let { knownEncoding(it) } ?: InformationValue.Unavailable,
+            sampleRate = MediaInformationText.positive(track.sampleRate, "Hz"),
+            channels = MediaInformationText.positive(track.channels, "ch"))
+        val device = track.device?.takeIf { candidate ->
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.id == candidate.id }
+        } ?: return base
+        val type = getDeviceTypeName(device.type)
+        val name = device.productName?.toString()?.takeIf { it.isNotBlank() && it != type }
+        val named = base.copy(device = InformationValue.Text(if (name == null) type else "$name / $type"))
+        val usb = device.type == AudioDeviceInfo.TYPE_USB_DEVICE || device.type == AudioDeviceInfo.TYPE_USB_HEADSET
+        val supported = try { audioManager.getSupportedMixerAttributes(device) }
+            catch (_: Exception) { return named.copy(bitPerfect = if (usb) InformationValue.Unavailable else InformationValue.Unsupported) }
+        if (supported.isEmpty()) return named.copy(bitPerfect = InformationValue.Unsupported, mixer = InformationValue.Unsupported)
+        val attributes = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build()
+        val preferred = try { audioManager.getPreferredMixerAttributes(attributes, device) }
+            catch (_: Exception) { return named.copy(bitPerfect = if (usb) InformationValue.Unavailable else InformationValue.Unsupported) }
+        val bitPerfect = when {
+            !usb || supported.none { it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT } -> InformationValue.Unsupported
+            activeDevice?.id == device.id && preferred?.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT ->
+                InformationValue.Text(context.getString(R.string.info_configured))
+            else -> InformationValue.NotSet
         }
-
-        // Audio format from current video
-        if (videoUri != null) {
-            val format = extractAudioFormat(videoUri)
-            if (format != null) {
-                sb.appendLine("Sample Rate: ${format.sampleRate} Hz")
-                sb.appendLine("Channels: ${format.channelCount}")
-            }
-        }
-
-        // AudioMixerAttributes info for all output devices
-        val allOutputDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-        val mixerDevices = allOutputDevices.filter { device ->
-            try {
-                audioManager.getSupportedMixerAttributes(device).isNotEmpty()
-            } catch (e: Exception) {
-                false
-            }
-        }
-
-        if (mixerDevices.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("--- Mixer Attributes ---")
-
-            val audioAttrs = android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build()
-
-            for (device in mixerDevices) {
-                val name = device.productName?.takeIf { it.isNotBlank() }
-                    ?: getDeviceTypeName(device.type)
-                sb.appendLine("Device: $name")
-
-                val preferred = audioManager.getPreferredMixerAttributes(audioAttrs, device)
-                if (preferred != null) {
-                    sb.appendLine("  Preferred:")
-                    sb.appendLine("    Behavior: ${mixerBehaviorName(preferred.mixerBehavior)}")
-                    appendFormatInfo(sb, preferred.format, "    ")
-                } else {
-                    sb.appendLine("  Preferred: None")
-                }
-            }
-        } else {
-            sb.appendLine()
-            sb.appendLine("--- Mixer Attributes ---")
-            sb.appendLine("No mixer attributes available")
-        }
-
-        return sb.toString().trimEnd()
+        if (preferred == null) return named.copy(bitPerfect = bitPerfect, mixer = InformationValue.NotSet)
+        return named.copy(bitPerfect = bitPerfect, mixer = InformationValue.Text(mixerBehaviorName(preferred.mixerBehavior)),
+            mixerEncoding = knownEncoding(preferred.format.encoding),
+            mixerSampleRate = MediaInformationText.positive(preferred.format.sampleRate, "Hz"),
+            mixerChannels = MediaInformationText.positive(preferred.format.channelCount, "ch"))
     }
+
+    private fun knownEncoding(encoding: Int): InformationValue = encodingName(encoding)
+        .takeUnless { it.startsWith("Unknown") }?.let { InformationValue.Text(it) } ?: InformationValue.Unavailable
 
     /**
      * 出力デバイスとミキサー状態の概要を返す（UIスレッドから呼べる軽量版）。
      */
-    fun getOutputSummary(): String {
+    fun getOutputSummary(outputDevice: AudioDeviceInfo?): String {
         val sb = StringBuilder()
 
-        // Output device
-        val outputDevice = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .firstOrNull {
-                it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
-                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET
-            }
         val deviceName = outputDevice?.productName?.takeIf { it.isNotBlank() }
             ?: getDeviceTypeName(outputDevice?.type)
         sb.append("Output: $deviceName")
 
         // Bit-perfect status
-        if (activeDevice != null) {
-            sb.append("  [Bit-Perfect]")
+        if (outputDevice != null && activeDevice?.id == outputDevice.id) {
+            sb.append("  [Bit-Perfect設定]")
         }
 
         // Preferred mixer info
@@ -221,7 +165,7 @@ class BitPerfectAudioManager(private val context: Context) {
             .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
             .build()
-        val mixerDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).filter { device ->
+        val mixerDevices = listOfNotNull(outputDevice).filter { device ->
             try {
                 audioManager.getSupportedMixerAttributes(device).isNotEmpty()
             } catch (_: Exception) { false }
@@ -244,20 +188,17 @@ class BitPerfectAudioManager(private val context: Context) {
         AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
         AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Built-in Speaker"
-        AudioDeviceInfo.TYPE_HDMI -> "HDMI"
-        else -> "Built-in Speaker"
+        AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC, AudioDeviceInfo.TYPE_HDMI_EARC -> "HDMI"
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER,
+        AudioDeviceInfo.TYPE_BLE_BROADCAST -> "Bluetooth"
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
+        else -> context.getString(R.string.info_unavailable)
     }
 
     private fun mixerBehaviorName(behavior: Int): String = when (behavior) {
         AudioMixerAttributes.MIXER_BEHAVIOR_DEFAULT -> "Default"
         AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT -> "Bit-Perfect"
         else -> "Unknown ($behavior)"
-    }
-
-    private fun appendFormatInfo(sb: StringBuilder, format: AudioFormat, indent: String) {
-        sb.appendLine("${indent}Sample Rate: ${format.sampleRate} Hz")
-        sb.appendLine("${indent}Channels: ${format.channelCount}")
-        sb.appendLine("${indent}Encoding: ${encodingName(format.encoding)}")
     }
 
     private fun encodingName(encoding: Int): String = when (encoding) {

@@ -11,6 +11,12 @@ import java.util.concurrent.TimeUnit;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsProvider;
 import java.io.FileNotFoundException;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Locale;
 
 /** Runs in the test APK's own process using only framework classes. */
@@ -18,6 +24,7 @@ public class ScrollFixtureProvider extends DocumentsProvider {
     public static final Uri tree = DocumentsContract.buildTreeDocumentUri("jp.nagu.continuousplayer.test.scroll", "root");
     private static final String[] COLUMNS = {"document_id", "_display_name", "mime_type", "_size", "last_modified"};
 
+    private final AtomicInteger d24Opens = new AtomicInteger();
     private volatile String blockedFolder;
     private volatile boolean failAfterRelease;
     private volatile boolean queryStarted;
@@ -25,7 +32,14 @@ public class ScrollFixtureProvider extends DocumentsProvider {
 
     @Override public Bundle call(String method, String arg, Bundle extras) {
         Bundle result = new Bundle();
-        if (method.equals("d22-prepare")) {
+        if (method.equals("d24-count")) {
+            result.putInt("opens", d24Opens.get());
+        } else if (method.equals("d24-reset")) {
+            d24Opens.set(0);
+        } else if (method.equals("d24-clean")) {
+            new File(getContext().getFilesDir(), "d24-media.wav").delete();
+            d24Opens.set(0);
+        } else if (method.equals("d22-prepare")) {
             queryRelease.countDown();
             queryStarted = false;
             failAfterRelease = extras != null && extras.getBoolean("fail");
@@ -98,11 +112,27 @@ public class ScrollFixtureProvider extends DocumentsProvider {
     }
 
     @Override public ParcelFileDescriptor openDocument(String id, String mode, CancellationSignal signal) throws FileNotFoundException {
+        if (id.equals("d24-audio/media")) {
+            d24Opens.incrementAndGet();
+            File file = new File(getContext().getFilesDir(), "d24-media.wav");
+            if (!file.exists()) {
+                byte[] data = new byte[8000 * 2 * 90];
+                ByteBuffer wave = ByteBuffer.allocate(data.length + 44).order(ByteOrder.LITTLE_ENDIAN);
+                wave.put("RIFF".getBytes()).putInt(data.length + 36).put("WAVEfmt ".getBytes()).putInt(16)
+                    .putShort((short)1).putShort((short)1).putInt(8000).putInt(16000).putShort((short)2).putShort((short)16)
+                    .put("data".getBytes()).putInt(data.length).put(data);
+                try (FileOutputStream output = new FileOutputStream(file)) { output.write(wave.array()); }
+                catch (IOException error) { throw new FileNotFoundException(error.toString()); }
+            }
+            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+        }
         if (id.equals("d25-denied")) throw new SecurityException("D25 provider denied read access");
         throw new FileNotFoundException("The test selects a file without decoding it");
     }
 
     private Object[] row(String id) {
+        if (id.equals("d24-audio/media")) return new Object[]{id, "D24 provider.wav", "audio/wav", 1440044L, 0L};
+        if (id.equals("d24-audio")) return new Object[]{id, "D24 SAF", DocumentsContract.Document.MIME_TYPE_DIR, 0L, 0L};
         boolean focusMedia = id.equals("focus-fixture/media-one") || id.equals("focus-fixture/media-two");
         String title = focusMedia ? "Duplicate.mp4" : id.equals("root") ? "Scroll fixture" : id.equals("media") ? "Sample.mp4" :
             id.equals("media-two") ? "Other Sample.mp4" : id.endsWith("/nested") ? "Nested folder" :

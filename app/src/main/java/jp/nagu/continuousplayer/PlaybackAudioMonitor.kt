@@ -29,6 +29,7 @@ internal class PlaybackAudioMonitor(
     private var released = false
     private var hasFocus = false
     private var track: AudioTrack? = null
+    private var lastRoutedDevice: AudioDeviceInfo? = null
     private var routedIds = emptySet<Int>()
     private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(attributes)
@@ -62,7 +63,7 @@ internal class PlaybackAudioMonitor(
         if (!released && router === track) {
             // Routing can fall back to the speaker before the removal callback arrives.
             onOutputsRemoved(routedIds - manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.id }.toSet())
-            router.routedDevice?.let { routedIds = setOf(it.id) }
+            router.routedDevice?.let { routedIds = setOf(it.id);lastRoutedDevice = it }
         }
     }
 
@@ -92,9 +93,24 @@ internal class PlaybackAudioMonitor(
             if (released) return@post
             track?.removeOnRoutingChangedListener(routingListener)
             track = audioTrack
+            lastRoutedDevice = null
             audioTrack.addOnRoutingChangedListener(routingListener, handler)
-            audioTrack.routedDevice?.let { routedIds = setOf(it.id) }
+            audioTrack.routedDevice?.let { routedIds = setOf(it.id);lastRoutedDevice = it }
         }
+    }
+
+    /** Only an observed AudioTrack route is reported; connected/policy devices are not substitutes. */
+    internal fun outputInformation(): AudioTrackInformation {
+        val current = track?.takeUnless { released } ?: return AudioTrackInformation()
+        val routed = runCatching { current.routedDevice }.getOrNull()
+        if (routed != null) lastRoutedDevice = routed
+        val device = (routed ?: lastRoutedDevice)?.takeIf { known ->
+            runCatching { manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.id == known.id } }.getOrDefault(false)
+        }
+        return AudioTrackInformation(device,
+            runCatching { current.sampleRate }.getOrNull(),
+            runCatching { current.channelCount }.getOrNull(),
+            runCatching { current.audioFormat }.getOrNull())
     }
 
     internal fun onOutputsRemoved(removedIds: Set<Int>) {
@@ -121,7 +137,13 @@ internal class PlaybackAudioMonitor(
         abandonFocus()
         track?.removeOnRoutingChangedListener(routingListener)
         track = null
+        lastRoutedDevice = null
         manager.unregisterAudioDeviceCallback(devices)
         context.unregisterReceiver(noisyReceiver)
     }
 }
+
+internal data class AudioTrackInformation(
+    val device: AudioDeviceInfo? = null, val sampleRate: Int? = null,
+    val channels: Int? = null, val encoding: Int? = null
+)

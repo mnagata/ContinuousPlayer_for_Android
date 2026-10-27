@@ -106,6 +106,7 @@ class PlayerController(
 
     val videoFormat get() = engine.videoFormat
     val audioFormat get() = engine.audioFormat
+    internal fun audioOutputInformation() = audioMonitor.outputInformation()
 
     private var externalCommandsBlocked = false
     private val modalPlayerCommands = Player.Commands.Builder().addAll(

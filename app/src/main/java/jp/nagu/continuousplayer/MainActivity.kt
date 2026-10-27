@@ -840,22 +840,28 @@ class MainActivity : AppCompatActivity() {
         return dialog
     }
 
+    @OptIn(UnstableApi::class)
     private fun showInfoDialog() {
         if (isFinishing || isDestroyed || playbackInformation != null || playbackSelection != null) return
         val controller = playerController ?: return
         val player = controller.player
-        val index = player.currentMediaItemIndex
-        val video = viewModel.videos.getOrNull(index) ?: return
-        val videoUri = Uri.parse(video.uri)
         val state = retainPlayback(controller)
+        val video = state.videos.getOrNull(state.mediaIndex) ?: return
+        // Preserve the observed route before pause makes AudioRouting return null.
+        val outputTrack = controller.audioOutputInformation()
         playbackInformation = state
         player.pause()
         updatePauseOverlay()
         exitImmersiveMode()
 
+        val metadata = currentMediaInformation(controller, video)
         val content = LayoutInflater.from(this).inflate(R.layout.dialog_playback_info, null)
-        content.findViewById<TextView>(R.id.info_filename).text = video.displayName
-        val audioText = content.findViewById<TextView>(R.id.info_audio).apply { visibility = View.GONE }
+        content.findViewById<TextView>(R.id.info_filename).text = metadata.name.ifBlank { getString(R.string.info_unavailable) }
+        content.findViewById<TextView>(R.id.info_file).text = MediaInformationText.render(MediaInformationText.file(metadata), ::getString)
+        content.findViewById<TextView>(R.id.info_formats).text = MediaInformationText.render(MediaInformationText.formats(metadata), ::getString)
+        val audioText = content.findViewById<TextView>(R.id.info_audio).apply {
+            text = MediaInformationText.render(MediaInformationText.output(AudioOutputInformation(), metadata.hasAudio), ::getString)
+        }
         val dialog = AlertDialog.Builder(this).create()
         informationDialog = dialog
         dialog.setView(content, 0, 0, 0, 0)
@@ -884,16 +890,38 @@ class MainActivity : AppCompatActivity() {
 
         val audio = bitPerfectAudio
         informationJob = lifecycleScope.launch {
-            val audioInfo = withContext(Dispatchers.IO) {
-                audio?.getAudioOutputInfo(videoUri) ?: ""
+            val audioInfo = try {
+                withContext(Dispatchers.IO) { audio?.getOutputInformation(outputTrack) ?: AudioOutputInformation() }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                Log.w(TAG, "Audio output information unavailable", error)
+                AudioOutputInformation()
             }
             if (playbackInformation !== state || state.restoring || informationDialog !== dialog ||
                 isFinishing || isDestroyed) return@launch
-            audioText.apply {
-                text = audioInfo
-                visibility = if (audioInfo.isEmpty()) View.GONE else View.VISIBLE
-            }
+            audioText.text = MediaInformationText.render(MediaInformationText.output(audioInfo, metadata.hasAudio), ::getString)
         }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun currentMediaInformation(controller: PlayerController, video: VideoItem): MediaInformation {
+        val tracks = controller.player.currentTracks
+        fun selected(type: Int, decoded: androidx.media3.common.Format?): androidx.media3.common.Format? = decoded
+            ?: tracks.groups.firstOrNull { it.type == type && it.isSelected }?.let { group ->
+                (0 until group.length).firstOrNull { group.isTrackSelected(it) }?.let { group.getTrackFormat(it) }
+            }
+        fun details(format: androidx.media3.common.Format?) = format?.let {
+            MediaTrackInformation(it.codecs, it.sampleMimeType, it.width, it.height, it.frameRate, it.sampleRate, it.channelCount)
+        }
+        fun presence(type: Int, format: androidx.media3.common.Format?): Boolean? =
+            if (format != null) true else if (!tracks.isEmpty) tracks.containsType(type) else null
+        val videoFormat = selected(androidx.media3.common.C.TRACK_TYPE_VIDEO, controller.videoFormat)
+        val audioFormat = selected(androidx.media3.common.C.TRACK_TYPE_AUDIO, controller.audioFormat)
+        return MediaInformation(video.displayName, video.size, controller.player.duration,
+            videoFormat?.containerMimeType ?: audioFormat?.containerMimeType ?: video.mimeType,
+            details(videoFormat), details(audioFormat),
+            presence(androidx.media3.common.C.TRACK_TYPE_VIDEO, videoFormat),
+            presence(androidx.media3.common.C.TRACK_TYPE_AUDIO, audioFormat))
     }
 
     private fun closeInformation() {
@@ -1013,7 +1041,7 @@ private fun updatePortraitVideoInfo() {
                            }
                        }
 
-                val outputSummary = bitPerfectAudio?.getOutputSummary()
+                val outputSummary = bitPerfectAudio?.getOutputSummary(playerController?.audioOutputInformation()?.device)
                 if (!outputSummary.isNullOrEmpty()) {
                     append("\n$outputSummary")
                        }

@@ -16,6 +16,7 @@
 
     <!-- Wrap short content; weight lets long content shrink while keeping OK visible. -->
     <ScrollView
+        android:id="@+id/info_scroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_weight="1"
@@ -27,6 +28,9 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <TextView android:id="@+id/info_file_heading" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/info_file_section" android:textColor="#66DFFF" android:textSize="18sp"
+                android:accessibilityHeading="true" android:fontFamily="sans-serif-medium" android:layout_marginBottom="8dp" />
             <TextView
                 android:id="@+id/info_filename"
                 android:layout_width="match_parent"
@@ -35,6 +39,16 @@
                 android:textSize="16sp"
                 android:fontFamily="sans-serif-medium" />
 
+            <TextView android:id="@+id/info_file" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:textColor="#D8E3F2" android:textSize="14sp" android:lineSpacingExtra="4dp" />
+            <TextView android:id="@+id/info_formats_heading" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="16dp" android:layout_marginBottom="8dp" android:text="@string/info_formats_section"
+                android:textColor="#66DFFF" android:textSize="18sp" android:accessibilityHeading="true" android:fontFamily="sans-serif-medium" />
+            <TextView android:id="@+id/info_formats" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#D8E3F2" android:textSize="14sp" android:lineSpacingExtra="4dp" />
+            <TextView android:id="@+id/info_output_heading" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="16dp" android:text="@string/info_output_section" android:textColor="#66DFFF"
+                android:textSize="18sp" android:accessibilityHeading="true" android:fontFamily="sans-serif-medium" />
             <TextView
                 android:id="@+id/info_audio"
                 android:layout_width="match_parent"
@@ -50,7 +64,9 @@
         android:id="@+id/info_close"
         android:focusedByDefault="true"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="wrap_content"
+        android:minHeight="48dp"
+        android:paddingVertical="8dp"
         android:layout_marginTop="16dp"
         android:text="@android:string/ok"
         android:textAllCaps="false"

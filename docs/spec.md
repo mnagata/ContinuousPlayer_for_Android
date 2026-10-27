@@ -121,9 +121,15 @@ TVアニメのOP/EDを中心に、選択したフォルダーの動画・音声�
 
 縦画面のサイズ欄は、不明な値を「サイズ不明」と表示する。SAFでもプロバイダーがサイズを返さない場合に該当する。
 
-情報ダイアログにはファイル名、音声出力デバイス、Bit-Perfect設定状態、ソース音声の形式、対応出力デバイスのPreferredミキサー属性（なければNone）を表示する。
+情報ダイアログは「ファイル」→「映像・音声形式」→「音声出力」の順に見出しを付けて表示する。取得できない値は「取得できません」、機器やアプリの機能として利用できないものは「未対応」、存在しないトラックは「なし」、対応していて優先設定がないミキサーは「未設定」と区別する。項目を空文字や負の値のまま表示しない。
 
-「メディア情報」ボタン・INFOキー・修飾なしのIで開く。情報取得より先に、現在のプレイヤー・ファイル・プレイリスト・元フォルダー・秒数・playWhenReadyとフォーカスを一時保持して一時停止する。元のファイル名とOKボタンはすぐに表示し、音声情報の取得後に内容を更新する。同時に複数の情報画面を開かない。文字拡大時は本文のスクロール領域を縮めてOKボタンの領域を確保する。
+- ファイル：元の名前の全文、サイズ（B／KiB／MiB／GiB等）、再生時間、コンテナーMIME。名前が取得できない場合も共通の未取得表記にする。
+- 映像・音声形式：現在の再生エンジンと選択トラックから、映像コーデック・MIME、解像度、フレームレート、音声コーデック・MIME、ソースサンプルレート・チャンネル数を表示する。値がない場合も未取得を明示する。音声のみ・映像のみでトラックが存在しないと確定した場合は「なし」とし、未対応と混同しない。情報表示のためにMediaExtractorで元メディアを開き直さない。
+- 音声出力：アプリ自身のAudioTrackで確認した出力経路、AudioTrackの形式・サンプルレート・チャンネル数、Bit-Perfect設定、実際の出力先の優先ミキサーとその設定形式を表示する。接続されているだけの機器を出力先と推測せず、経路を確認できない場合は取得できないと表示する。内蔵スピーカー等、Bit-Perfect設定対象でない出力や対応属性がない出力は未対応とする。
+
+[AudioRouting.getRoutedDevice](https://developer.android.com/reference/android/media/AudioRouting#getRoutedDevice())は再生中だけ有効なため、一時停止前の経路も保持する。[AudioTrackのサンプルレート・形式](https://developer.android.com/reference/android/media/AudioTrack#getSampleRate())はAudioTrackに設定された値として表示し、DACの実測値とは扱わない。Bit-Perfectの「設定済み」も、同じ経路への設定成功と優先属性を示すもので、実出力のビット一致を測定した結果ではない。
+
+「メディア情報」ボタン・INFOキー・修飾なしのIで開く。情報取得より先に、現在のプレイヤー・ファイル・プレイリスト・元フォルダー・秒数・playWhenReadyとフォーカスを一時保持して一時停止する。ファイルとソース形式を直ちに表示し、音声出力の初期値も未取得として表示してから取得後に更新する。出力の取得失敗でも区分や項目を非表示にしない。同時に複数の情報画面を開かない。文字拡大時は本文のスクロール領域を縮めてOKボタンの領域を確保する。
 
 OK・I・Esc・戻る・その他のダイアログ終了は、一覧キャンセルと共通の復元処理を使う。元が再生中なら同じ位置から再開し、元が一時停止なら停止を維持する。背景化・音声フォーカス喪失・使用中の出力切断を記録し、その後の閉じるでは再開しない。file／content URIのアクセス失効やプレイヤーエラーでも再開しない。表示中と閉じた後の復元待ちではPlay要求を拒否し、背後の再生を始めない。
 
@@ -407,7 +413,8 @@ Adaptive Iconのmonochromeにも同じ前景ベクターを参照する。各密
 | UsbFileBrowser | 外部ストレージ一覧、読み取り専用のフォルダー探索、file URIプレイリスト選択 |
 | GestureHandler / SwipeDirection / TapSuppression / PointerInput | 入力元の分離、単指スワイプ、タップ・クリック即応と重複抑制、多指・中断の取消 |
 | PointerControls | ポインター移動での表示、3秒の無操作タイマー、フォーカス・ホバー・タッチ探索の保護、カーソル制御 |
-| BitPerfectAudioManager | USBミキサー設定と出力情報 |
+| BitPerfectAudioManager | USBミキサー設定と実際の出力先のミキサー情報 |
+| MediaInformation | ソース・出力の区分、取得不能／未対応等の値と表示 |
 | PlayerViewModel / PlaybackFolder | メモリー内の一覧・再生画面フラグと、SAF・USB・DLNAの再生元フォルダー |
 | VideoItem | uri、displayName、size、lastModified、任意のmimeType |
 
@@ -470,6 +477,8 @@ Kotlinソースは `app/src/main/java/jp/nagu/continuousplayer/`、Manifestは `
 | DlnaSelectionDialogTest | D-pad、戻る／閉じる、縦横の登録ボタン・長い名前、SAF表示、ウィンドウ維持と初回サイズ |
 | BrowserLoadingTest | 各再生元の0.5秒表示・一覧維持、初回と取得中のキャンセル、遅い成功／失敗応答、TVフォーカス、再生復元 |
 | DlnaAddressConnectionTest | 探索中の手入力、入力保持・再試行、実HTTP接続と再接続、ID照合、TV・IME・再生復元、狭幅・拡大文字 |
+| MediaInformationTest | 未取得・未対応・トラックなし、負値・非有限値、ソースと出力の独立性 |
+| MediaInformationUiTest | 実音声・映像・SAF情報、追加読取の抑止、遅い結果、TV・拡大文字・回転 |
 | SavedDlnaFoldersTest | 永続化、再登録の更新、サーバー単位のID、オフライン削除、壊れた保存データ |
 | UsbFolderBrowserTest | USBフォルダー選択・保存済み一覧への復帰・再表示・長押し登録解除、保存データ検証、追加・登録後の共通ウィンドウの階層移動・再読み込み・エラー復帰・再生選択 |
 | SavedFolderBrowserTest | 保存済み一覧からDLNA選択、追加先切り替え時のウィンドウ維持、長押し登録解除 |
