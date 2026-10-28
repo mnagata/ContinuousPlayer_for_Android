@@ -616,16 +616,7 @@ class MainActivity : AppCompatActivity() {
         updateExternalPlaybackCommands()
         playerView.player = controller.player
 
-        val bitPerfect = BitPerfectAudioManager(this)
-        bitPerfectAudio = bitPerfect
-        val bitPerfectTarget = videos.getOrNull(startIndex) ?: videos.firstOrNull()
-        if (bitPerfectTarget != null) {
-            lifecycleScope.launch {
-                withContext(Dispatchers.IO) {
-                    bitPerfect.configure(Uri.parse(bitPerfectTarget.uri))
-                       }
-                   }
-               }
+        bitPerfectAudio = controller.outputPreferences
 
         controller.player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
@@ -745,7 +736,6 @@ class MainActivity : AppCompatActivity() {
         playbackErrorDialog = null
         playerView.keepScreenOn = false
         pauseOverlay.visibility = View.GONE
-        bitPerfectAudio?.release()
         bitPerfectAudio = null
         playerView.player = null
         playerController?.release()
@@ -861,6 +851,7 @@ class MainActivity : AppCompatActivity() {
         val audioText = content.findViewById<TextView>(R.id.info_audio).apply {
             text = MediaInformationText.render(MediaInformationText.output(AudioOutputInformation(), metadata.hasAudio), ::getString)
         }
+        content.findViewById<View>(R.id.info_audio_note).visibility = if (metadata.hasAudio == false) View.GONE else View.VISIBLE
         val dialog = AlertDialog.Builder(this).create()
         informationDialog = dialog
         dialog.setView(content, 0, 0, 0, 0)

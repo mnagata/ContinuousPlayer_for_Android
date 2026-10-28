@@ -366,6 +366,32 @@ class GesturePlaybackTest {
         SystemClock.sleep(platformLongPressTimeout() + 100)
         touch(MotionEvent.ACTION_UP, down, listOf(start))
         assertUnchanged(scenario, fixture)
+        assertNull(infoWindow())
+    }
+
+    @Test fun playingLongPressDoesNotOpenInformationOrChangePlayback() = withPlayback { scenario, f ->
+        scenario.onActivity { f.player.play() }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+        var pauses = 0
+        var seeks = 0
+        scenario.onActivity {
+            f.player.addListener(object : Player.Listener {
+                override fun onPlayWhenReadyChanged(ready: Boolean, reason: Int) { if (!ready) pauses++ }
+                override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) { seeks++ }
+            })
+        }
+        val start = origin(f)
+        val down = SystemClock.uptimeMillis()
+        touch(MotionEvent.ACTION_DOWN, down, listOf(start))
+        SystemClock.sleep(platformLongPressTimeout() + 150)
+        touch(MotionEvent.ACTION_UP, down, listOf(start))
+        scenario.onActivity {
+            assertNull(infoWindow())
+            assertTrue(f.player.isPlaying)
+            assertEquals(2, f.player.currentMediaItemIndex)
+            assertEquals(0, pauses)
+            assertEquals(0, seeks)
+        }
     }
 
     @Test fun pressShorterThanPlatformLongPressIsATap() = withPlayback { scenario, fixture ->

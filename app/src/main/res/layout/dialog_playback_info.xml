@@ -57,6 +57,14 @@
                 android:textColor="#D8E3F2"
                 android:textSize="14sp"
                 android:lineSpacingExtra="4dp" />
+            <TextView
+                android:id="@+id/info_audio_note"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/info_output_note"
+                android:textColor="#B2C1D6"
+                android:textSize="12sp" />
         </LinearLayout>
     </ScrollView>
 

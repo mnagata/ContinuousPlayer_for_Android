@@ -9,6 +9,16 @@ class MediaInformationTest {
     private fun value(rows:List<InformationRow>,label:Int)=rows.single { it.label==label }.value
     private fun text(value:InformationValue)=(value as InformationValue.Text).value
 
+    @Test fun routeConfirmationTimeUsesTheDeviceTimeZone() {
+        val time=java.time.Instant.parse("2026-10-28T00:01:02Z").toEpochMilli()
+        assertEquals("09:01:02",text(MediaInformationText.routeConfirmationTime(time,java.time.ZoneId.of("Asia/Tokyo"))))
+        assertEquals("00:01:02",text(MediaInformationText.routeConfirmationTime(time,java.time.ZoneId.of("UTC"))))
+    }
+    @Test fun missingConfirmationDoesNotInventTheCurrentTime() {
+        assertEquals(InformationValue.Unavailable,MediaInformationText.routeConfirmationTime(null))
+        assertEquals(InformationValue.Unavailable,MediaInformationText.routeConfirmationTime(-1))
+    }
+
     @Test fun unknownSizeAndDurationAreUnavailableRatherThanNegativeNumbers() {
         val rows=MediaInformationText.file(info(size=-1,duration=-9223372036854775807L))
         assertEquals(InformationValue.Unavailable,value(rows,R.string.info_file_size))
@@ -79,6 +89,25 @@ class MediaInformationTest {
         val configured=MediaInformationText.output(AudioOutputInformation(mixer=InformationValue.Text("Bit-Perfect")),true)
         assertEquals(InformationValue.Unavailable,value(configured,R.string.info_mixer_encoding))
         assertTrue(MediaInformationText.output(AudioOutputInformation(),null).all { it.value==InformationValue.Unavailable })
+    }
+    @Test fun measuredMixerAndPreferredMixerAreKeptSeparate() {
+        val rows=MediaInformationText.output(AudioOutputInformation(
+            mixer=InformationValue.Unsupported,
+            mixerDiagnostics=InformationValue.Text("再生中の取得結果"),
+            actualMixer=InformationValue.Text("deep_buffer_hires96_out (MIXER, I/O 2589)"),
+            actualMixerFormat=InformationValue.Text("PCM Float / 96000 Hz / 2 ch"),
+            halFormat=InformationValue.Text("PCM 16-bit / 96000 Hz / 2 ch")),true)
+        assertEquals(InformationValue.Unsupported,value(rows,R.string.info_mixer))
+        assertEquals("PCM Float / 96000 Hz / 2 ch",text(value(rows,R.string.info_actual_mixer_format)))
+        assertEquals("PCM 16-bit / 96000 Hz / 2 ch",text(value(rows,R.string.info_hal_format)))
+        assertFalse(rows.any { it.label==R.string.info_mixer_encoding })
+    }
+    @Test fun missingDiagnosticPermissionDoesNotInventMixerOrHalFormats() {
+        val rows=MediaInformationText.output(AudioOutputInformation(
+            mixerDiagnostics=InformationValue.Text("診断権限が未付与です")),true)
+        assertEquals(InformationValue.Unavailable,value(rows,R.string.info_actual_mixer))
+        assertEquals(InformationValue.Unavailable,value(rows,R.string.info_hal_format))
+        assertFalse(MediaInformationText.output(AudioOutputInformation(),true).any { it.label==R.string.info_actual_mixer })
     }
     @Test fun sourceAndOutputSampleRatesRemainIndependent() {
         val source=MediaInformationText.formats(info(audio=MediaTrackInformation(sampleRate=44100,channels=2)))

@@ -1,6 +1,9 @@
 package jp.nagu.continuousplayer
 
 import java.util.Locale
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 internal sealed interface InformationValue {
     data class Text(val value: String) : InformationValue
@@ -10,6 +13,7 @@ internal sealed interface InformationValue {
     data object NotSet : InformationValue
 }
 internal data class InformationRow(val label: Int, val value: InformationValue)
+internal enum class AudioRouteObservation { LIVE, LAST_KNOWN }
 internal data class MediaTrackInformation(
     val codec: String? = null, val mime: String? = null,
     val width: Int = -1, val height: Int = -1, val frameRate: Float = -1f,
@@ -30,11 +34,25 @@ internal data class AudioOutputInformation(
     val mixer: InformationValue = InformationValue.Unavailable,
     val mixerEncoding: InformationValue = InformationValue.Unavailable,
     val mixerSampleRate: InformationValue = InformationValue.Unavailable,
-    val mixerChannels: InformationValue = InformationValue.Unavailable
+    val mixerChannels: InformationValue = InformationValue.Unavailable,
+    val route: InformationValue = InformationValue.Unavailable,
+    val routeObservation: InformationValue = InformationValue.Unavailable,
+    val routeConfirmedAt: InformationValue = InformationValue.Unavailable,
+    val mixerDiagnostics: InformationValue? = null,
+    val actualMixer: InformationValue = InformationValue.Unavailable,
+    val actualMixerFormat: InformationValue = InformationValue.Unavailable,
+    val halFormat: InformationValue = InformationValue.Unavailable,
+    val mixerConfirmedAt: InformationValue = InformationValue.Unavailable
 )
 
 /** Values describe known facts; absence, unavailable data and unsupported features stay distinct. */
 internal object MediaInformationText {
+    private val routeTimeFormat = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT)
+    fun routeConfirmationTime(epochMs: Long?, zone: ZoneId = ZoneId.systemDefault()): InformationValue =
+        epochMs?.takeIf { it > 0 }?.let {
+            InformationValue.Text(routeTimeFormat.withZone(zone).format(Instant.ofEpochMilli(it)))
+        } ?: InformationValue.Unavailable
+
     private fun text(value: String?) = value?.takeIf { it.isNotBlank() }?.let { InformationValue.Text(it) } ?: InformationValue.Unavailable
     fun positive(value: Int?, unit: String): InformationValue =
         value?.takeIf { it > 0 }?.let { InformationValue.Text("$it $unit") } ?: InformationValue.Unavailable
@@ -66,10 +84,16 @@ internal object MediaInformationText {
     fun output(info: AudioOutputInformation, hasAudio: Boolean?): List<InformationRow> {
         if (hasAudio == false) return listOf(InformationRow(R.string.info_output, InformationValue.None))
         return buildList {
+            add(InformationRow(R.string.info_output_route, info.route))
             add(InformationRow(R.string.info_output_device, info.device))
             add(InformationRow(R.string.info_track_encoding, info.encoding))
             add(InformationRow(R.string.info_track_sample_rate, info.sampleRate))
             add(InformationRow(R.string.info_track_channels, info.channels))
+            if (info.mixerDiagnostics != null) {
+                add(InformationRow(R.string.info_actual_mixer, info.actualMixer))
+                add(InformationRow(R.string.info_actual_mixer_format, info.actualMixerFormat))
+                add(InformationRow(R.string.info_hal_format, info.halFormat))
+            }
             add(InformationRow(R.string.info_bit_perfect, info.bitPerfect))
             add(InformationRow(R.string.info_mixer, info.mixer))
             if (info.mixer is InformationValue.Text) {

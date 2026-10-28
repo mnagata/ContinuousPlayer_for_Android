@@ -24,6 +24,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Assume.assumeTrue
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.IOException
@@ -58,6 +59,94 @@ class MediaInformationUiTest {
         }
         shot("audio")
     }
+    @Test fun playingOutputShowsConfirmedRouteAndOutputLimits()=fixture { f ->
+        f.start(listOf(f.wave("confirmed route.wav")))
+        BrowserTestUi.waitUntil {
+            var confirmed=false
+            f.scenario.onActivity { confirmed=controller(it).audioOutputInformation().routeObservation==AudioRouteObservation.LIVE }
+            confirmed
+        }
+        open(f);awaitOutput(f)
+        f.scenario.onActivity {
+            assertTrue(text(R.id.info_audio).contains("出力経路：AudioTrack → "))
+            assertFalse(text(R.id.info_audio).contains("経路の確認："))
+            assertTrue(window()!!.findViewById<TextView>(R.id.info_audio_note).text.contains("HALポート名"))
+            assertEquals(View.VISIBLE,window()!!.findViewById<View>(R.id.info_audio_note).visibility)
+        }
+        shot("route")
+    }
+    @Test fun pausedOutputIdentifiesTheLastConfirmedRoute()=fixture { f ->
+        f.start(listOf(f.wave("remembered route.wav")))
+        BrowserTestUi.waitUntil {
+            var confirmed=false
+            f.scenario.onActivity { confirmed=controller(it).audioOutputInformation().routeObservation==AudioRouteObservation.LIVE }
+            confirmed
+        }
+        f.scenario.onActivity { f.player.pause() }
+        BrowserTestUi.waitUntil {
+            var remembered=false
+            f.scenario.onActivity { remembered=controller(it).audioOutputInformation().routeObservation==AudioRouteObservation.LAST_KNOWN }
+            remembered
+        }
+        open(f);awaitOutput(f)
+        f.scenario.onActivity {
+            assertTrue(text(R.id.info_audio).contains("出力経路：AudioTrack → "))
+            assertFalse(text(R.id.info_audio).contains("経路の確認："))
+        }
+        close(f)
+        f.scenario.onActivity { assertFalse(f.player.playWhenReady) }
+    }
+    @Test fun debugDiagnosticsShowTheObservedMixerAndHalAfterPausing()=fixture { f ->
+        assumeTrue("Requires the ADB diagnostic permission",
+            AudioMixerDiagnostics(context).accessState()==MixerDiagnosticsState.WAITING)
+        f.start(listOf(f.wave("diagnostic route.wav",96000,highPrecision=true)))
+        lateinit var snapshot: MixerRouteSnapshot
+        BrowserTestUi.waitUntil {
+            var captured: MixerRouteSnapshot?=null
+            f.scenario.onActivity { captured=controller(it).audioOutputInformation().mixerSnapshot }
+            captured?.let { snapshot=it; true } ?: false
+        }
+        f.scenario.onActivity { f.player.play() }
+        BrowserTestUi.waitUntil { f.player.isPlaying }
+        open(f);awaitOutput(f)
+        var retained:Any?=null
+        f.scenario.onActivity {
+            retained=MainActivity::class.java.getDeclaredField("playbackInformation").apply { isAccessible=true }.get(it)
+            val output=text(R.id.info_audio)
+            assertTrue(output.contains("出力経路：AudioTrack → ${snapshot.profile} → HAL → "))
+            assertTrue(output.contains("実ミキサー：${snapshot.profile} (${snapshot.type}, I/O ${snapshot.ioHandle})"))
+            assertTrue(output.contains("実ミキサー形式：${snapshot.mixerFormat.display()}"))
+            assertTrue(output.contains("HAL形式：${snapshot.halFormat.display()}"))
+            assertFalse(output.contains("ミキサー情報の確認："))
+            assertFalse(output.contains("ミキサー確認時刻："))
+            assertFalse(f.player.playWhenReady)
+            window()!!.findViewById<ScrollView>(R.id.info_scroll).fullScroll(View.FOCUS_DOWN)
+        }
+        shot("actual-mixer")
+        close(f)
+        BrowserTestUi.waitUntil {
+            var restored=false
+            f.scenario.onActivity { activity ->
+                restored=MainActivity::class.java.getDeclaredField("playbackInformation").apply { isAccessible=true }.get(activity)==null
+            }
+            restored
+        }
+        f.scenario.onActivity { activity ->
+            val background=MainActivity::class.java.getDeclaredField("isInBackground").apply { isAccessible=true }.getBoolean(activity)
+            val interrupted=retained!!.javaClass.getDeclaredField("interrupted").apply { isAccessible=true }.getBoolean(retained)
+            assertEquals("Backgrounding must still prevent automatic resume",!background && !interrupted,f.player.playWhenReady)
+        }
+    }
+    @Test fun observationWithoutRoutedDeviceDoesNotInventAnOutputPath() {
+        val audio=BitPerfectAudioManager(context)
+        try {
+            val info=audio.getOutputInformation(AudioTrackInformation(routeObservation=AudioRouteObservation.LIVE,
+                routeConfirmedAtMs=System.currentTimeMillis()))
+            assertEquals(InformationValue.Unavailable,info.route)
+            assertEquals(InformationValue.Unavailable,info.routeObservation)
+            assertEquals(InformationValue.Unavailable,info.routeConfirmedAt)
+        } finally { audio.release() }
+    }
     @Test fun videoOnlyShowsVideoCodecResolutionAndNoAudio()=fixture { f ->
         val file=File(f.root,"D24 video.mp4").apply { writeBytes(instrumentation.context.assets.open("d13-video.mp4").use { it.readBytes() }) }
         f.start(listOf(VideoItem(file.toURI().toString(),file.name,file.length(),0,"video/mp4")))
@@ -70,6 +159,7 @@ class MediaInformationUiTest {
             else assertTrue(text(R.id.info_formats).contains("フレームレート：取得できません"))
             assertTrue(text(R.id.info_formats).contains("音声トラック：なし"))
             assertEquals("音声出力：なし",text(R.id.info_audio))
+            assertEquals(View.GONE,window()!!.findViewById<View>(R.id.info_audio_note).visibility)
         }
         shot("video")
     }
@@ -82,7 +172,12 @@ class MediaInformationUiTest {
         f.start(listOf(f.wave("D24 no output data.wav")))
         f.scenario.onActivity { audioField().set(it,null) }
         open(f);awaitOutput(f)
-        f.scenario.onActivity { assertTrue(text(R.id.info_audio).contains("取得できません"));assertFalse(text(R.id.info_audio).contains("未対応"));assertTrue(window()!!.findViewById<View>(R.id.info_audio).isShown) }
+        f.scenario.onActivity {
+            assertTrue(text(R.id.info_audio).contains("出力経路：取得できません"))
+            assertFalse(text(R.id.info_audio).contains("経路の確認："))
+            assertFalse(text(R.id.info_audio).contains("最終確認時刻："))
+            assertFalse(text(R.id.info_audio).contains("未対応"));assertTrue(window()!!.findViewById<View>(R.id.info_audio).isShown)
+        }
     }
     @Test fun deviceWithoutBitPerfectReportsUnsupported()=fixture { f ->
         f.start(listOf(f.wave("D24 unsupported.wav")))
@@ -198,10 +293,14 @@ class MediaInformationUiTest {
 
     private inner class Fixture(val scenario:ActivityScenario<MainActivity>,val root:File) {
         lateinit var player:Player;var release:()->Unit={};var originalAudio:Any?=null
-        fun wave(name:String,rate:Int=8000):VideoItem {
-            val data=ByteArray(rate*2*90)
+        fun wave(name:String,rate:Int=8000,highPrecision:Boolean=false):VideoItem {
+            val channels=if(highPrecision)2 else 1
+            val sampleBytes=if(highPrecision)4 else 2
+            val data=ByteArray(rate*channels*sampleBytes*(if(highPrecision)40 else 90))
             val bytes=ByteBuffer.allocate(data.size+44).order(ByteOrder.LITTLE_ENDIAN).put("RIFF".toByteArray()).putInt(data.size+36)
-                .put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate*2).putShort(2).putShort(16).put("data".toByteArray()).putInt(data.size).put(data).array()
+                .put("WAVEfmt ".toByteArray()).putInt(16).putShort(if(highPrecision)3 else 1).putShort(channels.toShort()).putInt(rate)
+                .putInt(rate*channels*sampleBytes).putShort((channels*sampleBytes).toShort()).putShort((sampleBytes*8).toShort())
+                .put("data".toByteArray()).putInt(data.size).put(data).array()
             val file=File(root,name).apply { writeBytes(bytes) };return VideoItem(file.toURI().toString(),name,file.length(),0,"audio/wav")
         }
         fun start(media:List<VideoItem>,folder:PlaybackFolder=PlaybackFolder.Usb(root,root)) {

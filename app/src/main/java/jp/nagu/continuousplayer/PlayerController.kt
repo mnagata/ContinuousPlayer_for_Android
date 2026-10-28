@@ -15,6 +15,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.AudioOutputProvider
+import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommands
@@ -33,28 +35,29 @@ class PlayerController(
     private val onPlaybackFailure: ((PlaybackException) -> Unit)? = null,
     private val onPlaybackInterrupted: (() -> Unit)? = null,
     private val isPlaybackAllowed: () -> Boolean = { true },
-    private val isExternalInputAllowed: () -> Boolean = { true }
+    private val isExternalInputAllowed: () -> Boolean = { true },
+    audioOutputProviderFactory: ((Context) -> AudioOutputProvider)? = null
 ) {
 
     companion object {
         private const val TAG = "PlayerController"
         }
 
-    private val audioMonitor = PlaybackAudioMonitor(context.applicationContext, ::interruptPlayback)
+    internal val outputPreferences = BitPerfectAudioManager(context.applicationContext)
+    private val audioMonitor = PlaybackAudioMonitor(context.applicationContext, ::interruptPlayback, outputPreferences)
 
-    // Keep the default decoder/output configuration and observe the actual AudioTrack route.
+    // Let Media3 select float for high-resolution PCM and request float from capable decoders.
+    // Integer 16-bit PCM keeps its normal path; each new format reconfigures the sink.
     // The provider hook also covers USB/HDMI devices that do not send BECOMING_NOISY.
-    @Suppress("DEPRECATION") // Use Media3's default AudioTrack construction and observe its route.
     private val renderers = object : DefaultRenderersFactory(context) {
         override fun buildAudioSink(context: Context, enableFloatOutput: Boolean,
             enableAudioOutputPlaybackParams: Boolean): AudioSink = DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-            .setAudioTrackProvider { config, attributes, sessionId, trackContext ->
-                DefaultAudioSink.AudioTrackProvider.DEFAULT.getAudioTrack(config, attributes, sessionId, trackContext)
-                    .also(audioMonitor::observeTrack)
-            }.build()
-    }
+            .setAudioOutputProvider(UsbPcmAudioOutputProvider(outputPreferences, audioMonitor,
+                audioOutputProviderFactory?.invoke(context) ?: AudioTrackAudioOutputProvider.Builder(context).build()))
+            .build()
+    }.setEnableAudioFloatOutput(true)
 
     private val engine = ExoPlayer.Builder(context, renderers)
         .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
@@ -248,6 +251,7 @@ class PlayerController(
     fun release() {
         positionHandler.removeCallbacks(positionSampler)
         audioMonitor.release()
+        outputPreferences.release()
         player.removeListener(errorListener)
         mediaSession.release()
         player.release()
