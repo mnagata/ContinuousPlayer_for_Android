@@ -22,9 +22,9 @@ import java.io.File
 class HomeMenuTest {
     @Test fun homeShowsOnlyFolderSelection() = withHome { scenario, activity ->
         scenario.onActivity {
-            assertEquals("ホーム", it.findViewById<View>(R.id.folder_select_container).accessibilityPaneTitle)
+            assertEquals("ANIME OPENINGS / ENDINGS", it.findViewById<View>(R.id.folder_select_container).accessibilityPaneTitle)
             val buttons = descendants(it.findViewById(R.id.folder_select_container)).filterIsInstance<Button>().filter { button -> button.isShown }
-            assertEquals(listOf("OP / EDを選ぶ"), buttons.map { button -> button.text.toString() })
+            assertEquals(listOf("動画フォルダーを選ぶ"), buttons.map { button -> button.text.toString() })
             buttons.forEach { button ->
                 assertTrue(button.width <= it.findViewById<View>(R.id.folder_select_container).width)
                 assertTrue("Home label is clipped", button.layout.height <= button.height - button.compoundPaddingTop - button.compoundPaddingBottom)

@@ -59,8 +59,8 @@
     <string name="playback_completed">最後まで再生しました</string>
     <string name="return_to_home">ホームに戻る</string>
     <string name="tv_controls_hint">再生中: ← 前のファイル · → 次のファイル\n↑ 10秒戻す · ↓ 10秒進める · 決定 再生／一時停止\n一時停止中: 方向キーでボタンを選択 · 決定で実行</string>
-    <string name="home_title">ホーム</string>
-    <string name="home_select">OP / EDを選ぶ</string>
+    <string name="home_title">ANIME OPENINGS / ENDINGS</string>
+    <string name="home_select">動画フォルダーを選ぶ</string>
     <string name="usb_permission_title">USBメモリーへのアクセス</string>
     <string name="usb_permission_message">TVのUSBメモリーからフォルダーを選ぶため、設定でContinuousPlayerの「すべてのファイルへのアクセス」を許可してください。この許可は共有ストレージ全体の読み書きを可能にしますが、このアプリは再生用の読み取りだけを行います。許可したら戻るボタンでアプリに戻ってください。</string>
     <string name="usb_open_settings">設定を開く</string>
